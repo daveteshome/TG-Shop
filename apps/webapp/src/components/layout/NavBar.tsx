@@ -1,14 +1,14 @@
 import React from "react";
 import { useCartCount } from "../../lib/store";
 
-export type Tab = "shop" | "cart" | "orders" | "profile";
+export type Tab = "shop" | "universal" | "cart" | "orders" | "profile";
 
 export function NavBar({ tab, setTab }: { tab: Tab; setTab: (t: Tab) => void }) {
   const cartCount = useCartCount();
-
   return (
     <nav style={styles.bottomNav}>
       <button style={tab === "shop" ? styles.tabActive : styles.tab} onClick={() => setTab("shop")}>Shop</button>
+      <button style={tab === "universal" ? styles.tabActive : styles.tab} onClick={() => setTab("universal")}>Universal</button>
       <button style={tab === "cart" ? styles.tabActive : styles.tab} onClick={() => setTab("cart")}>
         Cart {cartCount ? <span style={styles.badge}>{cartCount}</span> : null}
       </button>
@@ -25,7 +25,7 @@ const styles: Record<string, React.CSSProperties> = {
     left: 0,
     right: 0,
     display: "grid",
-    gridTemplateColumns: "repeat(4, 1fr)",
+    gridTemplateColumns: "repeat(5, 1fr)",
     gap: 6,
     padding: 8,
     background: "var(--tg-theme-bg-color, #fff)",

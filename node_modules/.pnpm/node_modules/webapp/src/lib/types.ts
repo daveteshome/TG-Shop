@@ -10,7 +10,7 @@ export interface Product {
   title: string;
   price: number;           // minor units
   currency: string;        // e.g., "USD"
-  stock: number;
+  stock?: number;
   isActive: boolean;
   photoUrl?: string | null;
   description?: string | null;

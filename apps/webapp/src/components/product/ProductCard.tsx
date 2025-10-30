@@ -4,23 +4,34 @@ import { money } from "../../lib/format";
 
 const API_BASE = import.meta.env.VITE_API_BASE;
 
+type Mode = "personal" | "universal";
+
 export function ProductCard({
   p,
-  onAdd, // (p) => Promise<void>
+  onAdd,
+  mode = "personal",
+  onMessage,
+  onCall,
+  shopName,
+  shopPhone,
+  image,
 }: {
   p: Product;
-  onAdd: (p: Product) => Promise<void>;
+  onAdd?: (p: Product) => Promise<void>;
+  mode?: Mode;
+  onMessage?: () => void;
+  onCall?: () => void;
+  shopName?: string | null;
+  shopPhone?: string | null;
+  image?: string | null;
 }) {
-  const imgSrc = `${API_BASE}/products/${p.id}/image`;
-  console.log("[Card img]", `${API_BASE}/products/${p.id}/image`);
-
+  const imgSrc = image ?? `${API_BASE}/products/${p.id}/image`;
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState(false);
-
-  // ✅ normalize active flag from either shape (`isActive` or `active`)
   const isActive = (p as any).isActive ?? (p as any).active ?? true;
 
   async function handleAdd() {
+    if (!onAdd) return;
     if (adding) return;
     setAdding(true);
     try {
@@ -28,53 +39,40 @@ export function ProductCard({
       setAdded(true);
       (window as any).Telegram?.WebApp?.HapticFeedback?.impactOccurred?.("light");
       setTimeout(() => setAdded(false), 1000);
-    } catch (e) {
-      console.error("[cart] add failed", e);
-      alert("Could not add to cart. Please try again.");
-    } finally {
-      setAdding(false);
-    }
+    } finally { setAdding(false); }
   }
 
   return (
     <div style={styles.card}>
       <div style={styles.thumbWrap}>
-        <img
-          src={imgSrc}
-          alt={p.title}
-          style={styles.thumb}
-          loading="lazy"
-          onError={(e) => {
-            const el = e.currentTarget as HTMLImageElement;
-            if ((p as any).photoUrl) {
-              el.src = (p as any).photoUrl;
-            } else {
-              el.style.display = "none";
-              const ph = el.nextElementSibling as HTMLElement | null;
-              if (ph) ph.style.display = "grid";
-            }
-          }}
-        />
-        <div style={{ ...styles.thumbPlaceholder, display: "none" }}>No image</div>
-        {/* ✅ use normalized flag */}
+        <img src={imgSrc} alt={p.title} style={styles.thumb} loading="lazy"
+          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
         {!isActive && <span style={styles.badge}>Inactive</span>}
       </div>
 
       <div style={{ padding: 10 }}>
         <div style={styles.title}>{p.title}</div>
-        {p.description && <div style={styles.desc}>{p.description}</div>}
+        {shopName && <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 6 }}>{shopName}</div>}
         <div style={styles.row}>
           <span>{money(p.price, p.currency)}</span>
-          <span style={{ opacity: 0.7 }}>{(p.stock ?? 0)} in stock</span>
+          {mode === "personal" && <span style={{ opacity: 0.7 }}>{(p.stock ?? 0)} in stock</span>}
         </div>
-        <button
-          style={styles.primaryBtn}
-          // ✅ use normalized flag
-          disabled={adding || !isActive || (p.stock ?? 0) <= 0}
-          onClick={handleAdd}
-        >
-          {adding ? "Adding…" : added ? "✓ Added" : (p.stock ?? 0) > 0 ? "Add to cart" : "Out of stock"}
-        </button>
+
+        {mode === "universal" ? (
+          <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+            <button className="btn-primary" style={{ flex: 1 }} onClick={onMessage}>Message</button>
+            {shopPhone && <button className="btn-outline" style={{ flex: 1 }} onClick={onCall}>Call</button>}
+          </div>
+        ) : (
+          <button
+            disabled={!onAdd || (p.stock ?? 0) <= 0}
+            className="btn-primary"
+            style={{ width: "100%", marginTop: 10 }}
+            onClick={handleAdd}
+          >
+            {!onAdd ? "—" : adding ? "Adding…" : added ? "✓ Added" : (p.stock ?? 0) > 0 ? "Add to cart" : "Out of stock"}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -84,10 +82,7 @@ const styles: Record<string, React.CSSProperties> = {
   card: { border: "1px solid rgba(0,0,0,.08)", borderRadius: 12, overflow: "hidden", background: "var(--tg-theme-bg-color, #fff)" },
   thumbWrap: { position: "relative", aspectRatio: "1 / 1", background: "#f2f2f2" },
   thumb: { width: "100%", height: "100%", objectFit: "cover" },
-  thumbPlaceholder: { placeItems: "center", height: "100%", color: "#999" , display: "grid"},
   badge: { position: "absolute", top: 8, left: 8, background: "#111", color: "#fff", fontSize: 12, padding: "2px 6px", borderRadius: 8 },
   title: { fontWeight: 700, marginBottom: 6 },
-  desc: { fontSize: 13, opacity: 0.8, marginBottom: 8 },
-  row: { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 },
-  primaryBtn: { border: "none", background: "var(--tg-theme-button-color, #2481cc)", color: "var(--tg-theme-button-text-color, #fff)", padding: "10px 12px", borderRadius: 10, width: "100%", marginTop: 8 },
+  row: { display: "flex", alignItems: "center", justifyContent: "space-between" },
 };

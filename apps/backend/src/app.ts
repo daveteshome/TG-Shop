@@ -24,6 +24,12 @@ import { tenantApi } from './routes/tenantApi';
 import { telegramAuth } from './api/telegramAuth'; // must set req.user = { tgId }
 import productsRouter from './routes/products';
 
+import contactRouter from "./routes/contact";
+import shopRouter from "./routes/shop";
+import shopsRouter from "./routes/shops";
+import membersRouter from "./routes/members";
+
+
 export function createApp() {
   const app = express();
 
@@ -37,7 +43,7 @@ export function createApp() {
   app.use(cors({
     origin: [
       ENV.WEBAPP_URL,
-      'https://17de23e3b6b8.ngrok-free.app', //front
+      'https://ec4ed7b1e4e7.ngrok-free.app', //front
       'https://web.telegram.org',
       'https://oauth.telegram.org',
       /\.t\.me$/,
@@ -67,13 +73,22 @@ export function createApp() {
     }
   });
 
-  // Mount API with limiter
-  app.use('/api', apiLimiter);
-  // --- Tenant-aware API (auth required) ---
-  // Order matters: limiter above applies to this route because it shares the '/api' prefix.
-  app.use('/api/t/:slug', resolveTenant, telegramAuth, tenantApi);
-  app.use('/api', api);
-  api.use('/api/products', productsRouter);
+    // Mount API with limiter
+    app.use('/api', apiLimiter);
+    // --- Tenant-aware API (auth required) ---
+    // Order matters: limiter above applies to this route because it shares the '/api' prefix.
+    app.use('/api/t/:slug', resolveTenant, telegramAuth, tenantApi);
+  // “Public” API that still requires Telegram auth (the router itself calls telegramAuth)
+    app.use('/api', api);
+
+  // Image proxy should be mounted directly at /api/products/* (your webapp links to this)
+  app.use('/api/products', productsRouter);
+
+  // Mount helpers we’re missing:
+  app.use('/api/contact-intent', contactRouter);
+  app.use('/api/shop', shopRouter);
+  app.use('/api', shopsRouter);     // new: shops list + create tenant
+  app.use('/api', membersRouter);   // new: invites + members mgmt
 
   // ----- Telegram Bot -----
   bot.use(ensureUser());

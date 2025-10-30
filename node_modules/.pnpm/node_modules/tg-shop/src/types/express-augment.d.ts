@@ -13,5 +13,6 @@ declare global {
       /** Set by your telegramAuth middleware */
       userId?: string;
     }
+    // ...
   }
 }

@@ -1,5 +1,5 @@
 // prisma/schema.prisma
-// Multi-tenant Telegram e‑commerce schema
+// TG-Shop — Multi-tenant Telegram e-commerce schema (Final: Phase 1+2 + admin + shipments)
 
 generator client {
   provider = "prisma-client-js"
@@ -67,6 +67,44 @@ enum SubscriptionStatus {
   inactive
 }
 
+enum ShopRole {
+  OWNER
+  HELPER
+  COLLABORATOR
+  MEMBER
+}
+
+enum ReviewStatus {
+  pending
+  approved
+  rejected
+}
+
+enum ContactType {
+  message
+  call
+}
+
+enum ReportTarget {
+  TENANT
+  PRODUCT
+}
+
+enum PlatformRole {
+  USER
+  ADMIN
+  MOD
+}
+
+enum ShipmentStatus {
+  pending
+  packed
+  shipped
+  delivered
+  canceled
+  returned
+}
+
 /// ===== Core Multi-tenant Entities =====
 
 model Tenant {
@@ -76,12 +114,21 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // --- NEW: per-tenant Telegram config ---
-  botToken    String? // store the bot token for this tenant
-  botUsername String? // optional, e.g. @my_tenant_bot
-  postChatId  String? // where you post products (string to safely hold 64-bit chat IDs)
+  // Public profile / universal marketplace controls
+  publicPhone      String?
+  publishUniversal Boolean @default(false)
 
-  // Back-relations for ALL tenant-scoped data
+  // Per-tenant Telegram config
+  botToken     String?
+  botUsername  String?
+  postChatId   String?
+
+  // Hardening for future encrypted bot tokens
+  botTokenEnc    Bytes?
+  botTokenNonce  Bytes?
+  botTokenKmsKey String?
+
+  // Back-relations
   addresses       Address[]
   productImages   ProductImage[]
   productVariants ProductVariant[]
@@ -98,23 +145,37 @@ model Tenant {
   categories      Category[]
   carts           Cart[]
   orders          Order[]
+  shipments       Shipment[]
+
+  // Extras
+  contactIntents  ContactIntent[]
+  blockList       BlockList[]
+  memberships     Membership[]
+  invites         ShopInvite[]
+  sessions        MiniAppSession[]
+  settings        TenantSettings?
+  productViews    ProductView[]
+  reports         Report[]
+  membershipAudit MembershipAudit[]
 
   @@index([slug])
 }
 
-/// Telegram user (global across tenants). We keep tenant-scoped data (addresses, carts, etc.) via separate tenantId FKs.
 model User {
-  tgId      String   @id
-  username  String?
-  name      String?
-  phone     String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  tgId         String        @id
+  username     String?
+  name         String?
+  phone        String?
+  platformRole PlatformRole  @default(USER)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
-  orders    Order[]
-  carts     Cart[] // one cart per tenant; see Cart model
-  favorites Favorite[]
-  addresses Address[]
+  orders      Order[]
+  carts       Cart[]
+  favorites   Favorite[]
+  addresses   Address[]
+  memberships Membership[]
+  sessions    MiniAppSession[]
 }
 
 /// Shipping / billing address scoped to a tenant+user
@@ -123,7 +184,7 @@ model Address {
   tenantId String
   userId   String
 
-  label      String? // e.g., "Home"
+  label      String?
   line1      String
   line2      String?
   city       String
@@ -136,8 +197,8 @@ model Address {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user   User    @relation(fields: [userId], references: [tgId])
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [tgId])
   Order  Order[]
 
   @@unique([tenantId, userId, label])
@@ -146,7 +207,6 @@ model Address {
 }
 
 /// ===== Catalog =====
-// prisma/schema.prisma  (only the relevant parts)
 
 model Category {
   id        String   @id @default(cuid())
@@ -178,48 +238,44 @@ model Product {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  // ✅ NEW
+  // Category
   categoryId String?
   category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 
-  tenant     Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  images     ProductImage[]
-  variants   ProductVariant[]
-  favorites  Favorite[]
-  inventory  InventoryMove[]
-  orderItems OrderItem[]
-  CartItem   CartItem[]
+  // Publication flags
+  isPublished        Boolean      @default(false) // visible in personal shop
+  publishToUniversal Boolean      @default(false) // candidate for universal feed
+  reviewStatus       ReviewStatus @default(pending) // moderation state
+  reviewedAt         DateTime?
+  reviewedBy         String?
+
+  // Relations
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  images         ProductImage[]
+  variants       ProductVariant[]
+  favorites      Favorite[]
+  inventory      InventoryMove[]
+  orderItems     OrderItem[]
+  CartItem       CartItem[]
+  contactIntents ContactIntent[]
+  views          ProductView[]
+  reports        Report[]
 
   @@unique([tenantId, sku])
   @@index([tenantId])
   @@index([active])
   @@index([title])
-  @@index([tenantId, categoryId]) // helpful for filtering by category
-}
-
-model Image {
-  id            String   @id @default(cuid())
-  sha256        String   @unique
-  bucketKeyBase String // e.g. "images/<sha256>"
-  width         Int
-  height        Int
-  mime          String
-  tenantId      String?
-  createdAt     DateTime @default(now())
-
-  // Back relation to ProductImage
-  productImages ProductImage[]
-
-  @@index([tenantId])
+  @@index([tenantId, categoryId])
+  @@index([publishToUniversal, reviewStatus, active, createdAt], name: "universal_feed_idx")
 }
 
 model ProductImage {
   id        String  @id @default(cuid())
   tenantId  String
   productId String
-  imageId   String? // link to Image.id (R2/Cloudflare)
-  url       String? // legacy/external
-  tgFileId  String? // keep Telegram file_id if you like
+  imageId   String?
+  url       String?
+  tgFileId  String?
   alt       String?
   position  Int     @default(0)
 
@@ -234,12 +290,27 @@ model ProductImage {
   @@index([productId])
 }
 
+model Image {
+  id            String   @id @default(cuid())
+  sha256        String   @unique
+  bucketKeyBase String
+  width         Int
+  height        Int
+  mime          String
+  tenantId      String?
+  createdAt     DateTime @default(now())
+
+  productImages ProductImage[]
+
+  @@index([tenantId])
+}
+
 model ProductVariant {
   id        String   @id @default(cuid())
   tenantId  String
   productId String
-  name      String // e.g., "Size M / Red"
-  priceDiff Decimal? @db.Decimal(10, 2) // delta from product price; nullable if same
+  name      String
+  priceDiff Decimal? @db.Decimal(10, 2)
   sku       String?
   stock     Int      @default(0)
   createdAt DateTime @default(now())
@@ -281,8 +352,8 @@ model Cart {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user   User       @relation(fields: [userId], references: [tgId])
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [tgId])
   items  CartItem[]
 
   @@unique([tenantId, userId]) // one cart per user *per tenant*
@@ -304,8 +375,11 @@ model CartItem {
   tenant  Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   cart    Cart            @relation(fields: [cartId], references: [id], onDelete: Cascade)
   product Product         @relation(fields: [productId], references: [id])
-  variant ProductVariant? @relation(fields: [variantId], references: [id]) // ← optional to match variantId?
+  variant ProductVariant? @relation(fields: [variantId], references: [id])
 
+  // NOTE: In Postgres, UNIQUE with nullable variantId allows multiple NULLs.
+  // If you must dedupe NULL variants, enforce in application logic.
+  @@unique([tenantId, cartId, productId, variantId])
   @@index([tenantId])
   @@index([cartId])
   @@index([productId])
@@ -325,16 +399,28 @@ model Order {
   updatedAt DateTime    @updatedAt
   shortCode String?     @unique
 
+  // Address snapshot (immutable for audit/history)
+  shipName    String?
+  shipPhone   String?
+  shipLine1   String?
+  shipLine2   String?
+  shipCity    String?
+  shipRegion  String?
+  shipCountry String?
+  shipPostal  String?
+
   tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user     User            @relation(fields: [userId], references: [tgId])
-  address  Address?        @relation(fields: [addressId], references: [id]) // ← optional to match addressId?
+  address  Address?        @relation(fields: [addressId], references: [id])
   items    OrderItem[]
   payments PaymentIntent[]
+  shipments Shipment[]
 
   @@index([tenantId])
   @@index([userId])
   @@index([status])
   @@index([createdAt])
+  @@index([tenantId, status, createdAt])
 }
 
 model OrderItem {
@@ -352,12 +438,31 @@ model OrderItem {
   tenant  Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   order   Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product Product         @relation(fields: [productId], references: [id])
-  variant ProductVariant? @relation(fields: [variantId], references: [id]) // ← optional to match variantId?
+  variant ProductVariant? @relation(fields: [variantId], references: [id])
 
   @@index([tenantId])
   @@index([orderId])
   @@index([productId])
   @@index([variantId])
+}
+
+/// Shipment / fulfillment lifecycle (separate from payment)
+model Shipment {
+  id         String         @id @default(cuid())
+  tenantId   String
+  orderId    String
+  status     ShipmentStatus @default(pending)
+  carrier    String?
+  trackingNo String?
+  shippedAt  DateTime?
+  deliveredAt DateTime?
+  meta       Json?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  order  Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([orderId, status])
 }
 
 /// Wishlist / likes
@@ -376,6 +481,147 @@ model Favorite {
   @@index([tenantId])
   @@index([userId])
   @@index([productId])
+}
+
+/// ===== Universal Shop: Contacts, Memberships, Invites, Sessions, Views, Reports =====
+
+model ContactIntent {
+  id         String      @id @default(cuid())
+  tenantId   String
+  productId  String
+  buyerTgId  String
+  type       ContactType
+  createdAt  DateTime    @default(now())
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@index([productId])
+  @@index([buyerTgId])
+}
+
+model BlockList {
+  id        String   @id @default(cuid())
+  tenantId  String
+  buyerTgId String
+  reason    String?
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, buyerTgId])
+  @@index([tenantId])
+}
+
+model Membership {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String
+  role      ShopRole @default(MEMBER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [tgId])
+
+  @@unique([tenantId, userId])
+  @@index([tenantId, role])
+  @@index([userId])
+}
+
+model ShopInvite {
+  id        String   @id @default(cuid())
+  tenantId  String
+  code      String   @unique
+  role      ShopRole @default(MEMBER)
+  createdBy String
+  maxUses   Int?
+  usedCount Int      @default(0)
+  expiresAt DateTime?
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([expiresAt])
+}
+
+model MiniAppSession {
+  id        String   @id @default(cuid())
+  userId    String
+  tgChatId  String?
+  initHash  String
+  openedAt  DateTime @default(now())
+  tenantId  String?
+
+  user   User    @relation(fields: [userId], references: [tgId])
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+
+  @@index([userId, openedAt])
+  @@index([tenantId])
+}
+
+model TenantSettings {
+  tenantId             String  @id
+  checkoutEnabled      Boolean @default(true)
+  universalEnabled     Boolean @default(true)
+  allowDMFromUniversal Boolean @default(true)
+  locale               String?
+  timezone             String?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model ProductView {
+  id         String   @id @default(cuid())
+  tenantId   String
+  productId  String
+  viewerTgId String?
+  source     String? // "local" | "universal" | "bot"
+  createdAt  DateTime @default(now())
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@index([productId, createdAt])
+}
+
+model Report {
+  id           String       @id @default(cuid())
+  target       ReportTarget
+  tenantId     String
+  productId    String?
+  reporterTgId String?
+  reason       String?
+  createdAt    DateTime     @default(now())
+  resolvedAt   DateTime?
+  resolvedBy   String?
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([productId])
+}
+
+/// Audit trail for membership changes (optional but recommended)
+model MembershipAudit {
+  id        String   @id @default(cuid())
+  tenantId  String
+  actorId   String   // who performed the change (OWNER/ADMIN)
+  targetId  String   // whose membership changed
+  action    String   // "INVITE_CREATE" | "JOIN_ACCEPT" | "ROLE_UPDATE" | "REMOVE" | "TRANSFER_OWNERSHIP"
+  fromRole  ShopRole?
+  toRole    ShopRole?
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt])
+  @@index([actorId])
+  @@index([targetId])
 }
 
 /// ===== Payments & Webhooks (per order) =====
@@ -475,7 +721,7 @@ model TenantInvoice {
 model TenantPayment {
   id          String          @id @default(cuid())
   tenantId    String
-  invoiceId   String? // optional FK => optional relation
+  invoiceId   String?
   provider    PaymentProvider
   providerRef String?
   amount      Decimal         @db.Decimal(10, 2)

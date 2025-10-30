@@ -1,6 +1,6 @@
 // apps/backend/src/server/routes.ts
 import { Router } from 'express';
-import { telegramAuth } from '../api/telegramAuth';
+
 import { CatalogService } from '../services/catalog.service';
 import { CartService } from '../services/cart.service';
 import  ProductsRouter  from "../routes/products";
@@ -12,6 +12,13 @@ import {Readable } from "node:stream";
 import { publicImageUrl } from "../lib/r2"; // <-- adjust ../ if your path differs
 import { firstImageWebUrl } from "../services/image.resolve";
 
+import { resolveTenant } from '../middlewares/resolveTenant';
+import { telegramAuth } from '../api/telegramAuth';
+
+import type { Request } from "express";
+import type { Tenant } from "@prisma/client";
+type ReqWithTenant = Request & { tenantId?: string; tenant?: Tenant };
+
 
 export const api = Router();
 
@@ -20,6 +27,12 @@ if (!BOT_TOKEN) {
   // optional: log a warning; the route below needs it.
   console.warn("BOT_TOKEN is missing – /api/products/:id/image will not work.");
 }
+
+function resolveBotToken(slug?: string | null) {
+  // Prefer per-tenant env var, else global bot token
+  return (slug ? process.env[`BOT_TOKEN__${slug.toUpperCase()}`] : undefined) || process.env.BOT_TOKEN;
+}
+
 
 function int(v: any, d: number) { const n = parseInt(String(v ?? ''), 10); return Number.isFinite(n) ? n : d; }
 
@@ -86,9 +99,199 @@ api.get("/_debug/tenant-cats", async (_req, res) => {
   res.json({ tenantId, count });
 });
 
-
+//api.post('/auth/telegram', authTelegramHandler);
 // -------- AUTH GUARD --------
 api.use(telegramAuth);
+
+// apps/backend/src/server/routes.ts  (add near other routes)
+api.post('/tenants', async (req: any, res) => {
+  // requires telegramAuth earlier so req.userId is set
+  const userId = req.userId!;
+  const { name } = req.body || {};
+  if (!name || String(name).trim().length < 3) return res.status(400).json({ error: 'name_too_short' });
+
+  const clean = String(name).trim();
+  const slugBase = clean.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+  const slug = slugBase || `shop-${Math.random().toString(36).slice(2, 6)}`;
+
+  const exists = await db.tenant.findUnique({ where: { slug } });
+  const finalSlug = exists ? `${slug}-${Math.random().toString(36).slice(2, 4)}` : slug;
+
+  const tenant = await db.$transaction(async (tx) => {
+    const t = await tx.tenant.create({ data: { slug: finalSlug, name: clean } });
+    await tx.membership.create({ data: { tenantId: t.id, userId, role: 'OWNER' } });
+    return t;
+  });
+
+  res.json({ tenant });
+});
+
+
+// GET /shops/list?userId=123
+api.get('/shops/list', async (req, res, next) => {
+  try {
+    const { userId } = req.query as any;
+    const owned = await db.membership.findMany({
+      where: { userId, role: 'OWNER' },
+      include: { tenant: true },
+    });
+    const joined = await db.membership.findMany({
+      where: { userId, role: { in: ['MEMBER','HELPER','COLLABORATOR'] } },
+      include: { tenant: true },
+    });
+    // universal is virtual entry
+    res.json({
+      universal: { title: 'Universal Shop', key: 'universal' },
+      myShops: owned.map(m => m.tenant),
+      joinedShops: joined.map(m => m.tenant),
+    });
+  } catch (e) { next(e); }
+});
+
+
+// Create invite (OWNER)
+api.post('/tenants/:tenantId/invites', async (req, res, next) => {
+  try {
+    const { tenantId } = req.params;
+    const { role, maxUses, expiresAt, actorId } = req.body;
+    const code = Math.random().toString(36).slice(2,10);
+    const invite = await db.shopInvite.create({
+      data: { tenantId, role, maxUses, expiresAt: expiresAt ? new Date(expiresAt) : null, code, createdBy: actorId },
+    });
+    res.json({ invite, deepLink: `https://t.me/${process.env.BOT_USERNAME}?start=join_${code}` });
+  } catch (e) { next(e); }
+});
+
+// Accept invite (bot callback)
+api.post('/invites/accept', async (req, res, next) => {
+  try {
+    const { code, userId } = req.body;
+    const inv = await db.shopInvite.findUnique({ where: { code } });
+    if (!inv) return res.status(404).json({ error: 'invalid invite' });
+    if (inv.expiresAt && inv.expiresAt < new Date()) return res.status(410).json({ error: 'expired' });
+    if (inv.maxUses && inv.usedCount >= inv.maxUses) return res.status(409).json({ error: 'max uses reached' });
+
+    await db.$transaction(async (tx) => {
+      await tx.membership.upsert({
+        where: { tenantId_userId: { tenantId: inv.tenantId, userId } },
+        create: { tenantId: inv.tenantId, userId, role: inv.role },
+        update: { role: inv.role },
+      });
+      await tx.shopInvite.update({ where: { id: inv.id }, data: { usedCount: { increment: 1 } } });
+      await tx.membershipAudit.create({
+        data: { tenantId: inv.tenantId, actorId: userId, targetId: userId, action: 'JOIN_ACCEPT', toRole: inv.role },
+      });
+    });
+
+    res.json({ ok: true, tenantId: inv.tenantId });
+  } catch (e) { next(e); }
+});
+
+// List members
+api.get('/tenants/:tenantId/members', async (req, res, next) => {
+  try {
+    const { tenantId } = req.params;
+    const members = await db.membership.findMany({ where: { tenantId }, include: { user: true } });
+    res.json({ members });
+  } catch (e) { next(e); }
+});
+
+// Update role (OWNER)
+api.patch('/tenants/:tenantId/members/:userId', async (req, res, next) => {
+  try {
+    const { tenantId, userId } = req.params;
+    const { role, actorId } = req.body;
+    const m = await db.membership.update({ where: { tenantId_userId: { tenantId, userId } }, data: { role } });
+    await db.membershipAudit.create({ data: { tenantId, actorId, targetId: userId, action: 'ROLE_UPDATE', toRole: role } });
+    res.json({ member: m });
+  } catch (e) { next(e); }
+});
+
+// Remove member
+api.delete('/tenants/:tenantId/members/:userId', async (req, res, next) => {
+  try {
+    const { tenantId, userId } = req.params;
+    await db.membership.delete({ where: { tenantId_userId: { tenantId, userId } } });
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// UNIVERSAL FEED
+api.get('/universal', async (req, res, next) => {
+  try {
+    const { q, categoryId, limit, cursor } = req.query as any;
+
+    // ✅ FIX: method is listUniversalFeed (not universalFeed)
+    const { items, nextCursor } = await CatalogService.listUniversalFeed({
+      q,
+      categoryId,
+      limit: limit ? Number(limit) : undefined,
+      cursor: cursor as string | undefined,
+    });
+
+    res.json({ items, nextCursor });
+  } catch (e) { next(e); }
+});
+
+
+// TENANT PRODUCTS by slug
+// TENANT PRODUCTS by slug
+api.get('/shop/:slug/products', resolveTenant, async (req: ReqWithTenant, res, next) => {
+  try {
+    const tenantId = req.tenantId!;
+
+    const products = await db.product.findMany({
+      where: { tenantId, active: true },
+      orderBy: [{ createdAt: 'desc' }],
+      include: {
+        images: { orderBy: { position: 'asc' }, take: 1, select: { tgFileId: true, imageId: true, url: true } },
+      },
+    });
+
+    const items = await Promise.all(
+      products.map(async (p) => {
+        const photo = await firstImageWebUrl(p.id);
+        return {
+          id: p.id,
+          title: p.title,
+          description: p.description ?? null,
+          price: Number(p.price),
+          currency: p.currency,
+          stock: p.stock,
+          active: p.active,
+          categoryId: p.categoryId ?? null,
+          photoUrl: photo,
+        };
+      })
+    );
+
+    res.json({ items, tenant: req.tenant });
+  } catch (e) { next(e); }
+});
+
+
+
+// CONTACT INTENT from universal
+api.post('/products/:productId/contact', async (req, res, next) => {
+  try {
+    const { productId } = req.params;
+    const { type, buyerTgId } = req.body as { type: 'message' | 'call'; buyerTgId: string };
+
+    if (type !== 'message' && type !== 'call') {
+      return res.status(400).json({ error: 'type must be "message" or "call"' });
+    }
+
+    const product = await db.product.findUnique({ where: { id: productId }, select: { tenantId: true } });
+    if (!product) return res.status(404).json({ error: 'not found' });
+
+    await db.contactIntent.create({
+      data: { tenantId: product.tenantId, productId, buyerTgId, type },
+    });
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+
 
 // ---------- Catalog ----------
 api.get("/categories", async (_req, res, next) => {
@@ -143,7 +346,7 @@ api.get("/products/:id/image", async (req, res) => {
           take: 1,
           select: { tgFileId: true, imageId: true, url: true },
         },
-        tenant: { select: { slug: true, botToken: true } },
+        tenant: { select: { slug: true } },
       },
     });
 
@@ -190,16 +393,12 @@ api.get("/products/:id/image", async (req, res) => {
 
     if (im.tgFileId) {
       const slug = p.tenant?.slug;
-      const botToken =
-        p.tenant?.botToken ||
-        (slug ? process.env[`BOT_TOKEN__${slug.toUpperCase()}`] : undefined) ||
-        process.env.BOT_TOKEN;
+      const botToken = resolveBotToken(slug);
 
       if (!botToken) {
         console.error("[image:route] missing bot token", { productId: id, slug });
         return res.status(500).send(`BOT_TOKEN missing for tenant ${slug ?? "(unknown)"}`);
       }
-
       const meta = await fetch(
         `https://api.telegram.org/bot${botToken}/getFile?file_id=${encodeURIComponent(im.tgFileId)}`
       );

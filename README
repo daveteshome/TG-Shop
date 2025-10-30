@@ -72,6 +72,10 @@ apps/
    ├─ tsconfig.node.json
    └─ vite.config.ts
 
+
+How To run
+
+First run this
 # --- Write a clean v3 config to the path you want ---
 $cfg = @"
 version: 3
@@ -102,6 +106,10 @@ ngrok config check --config $env:NGROK_CONFIG
 ngrok start backend webapp --config $env:NGROK_CONFIG
 
 
+copy the fron and back of ngrock and update 
+
+
+
 pnpm dev          # run with ts-node + nodemon
 pnpm db:studio    # GUI to inspect DB
 ngrok http 4000
@@ -118,395 +126,203 @@ pnpm prisma generate
  auth/security and UI/functional features).
 
 
+🛍️ TG-Shop — Telegram Commerce & Marketplace Platform
+1. What we’re building
 
- P0 — Core Shopper Flow (finish & polish)
+TG-Shop is a Telegram-based commerce platform that allows anyone to buy, sell, and discover products entirely within Telegram.
+It combines:
 
-Goal: Smooth “browse → learn → add → checkout → confirm” with zero dead ends.
+a Mini App (WebApp) — a rich interface for shops and customers,
 
-Product Detail Page
+a Telegram Bot — for onboarding, notifications, and chat actions,
 
-Deliverables: /product/:id route; gallery (zoomable image), title, price, stock, full description, “Add to cart”, “Buy now”, sticky mini-cart summary.
+a multi-tenant backend — for managing data across all shops.
 
-Accepts: From grid, deep-link, and back button.
+The platform supports two layers:
 
-AC:
+Private or Local Shops – owned or joined by individual users.
 
-Image loads with fallback; price & currency shown.
+Universal Shop – a global public marketplace.
 
-“Buy now” creates a single-item pending order and jumps to confirmation.
+2. The user roles
+🧑‍💼 Merchants (shop owners)
 
-“Add to cart” updates badge immediately (optimistic), reconciles on success/fail.
+Create and manage their own shop from Telegram.
 
-Catalog Search & Sort
+Add and update products, descriptions, prices, and photos.
 
-Deliverables: Search input (debounced), sort dropdown (Newest | Price ↑ | Price ↓).
+Decide whether to publish products only inside their shop or also on the Universal Shop for global visibility.
 
-AC:
+Manage orders, stock, and communication with buyers.
 
-Typing updates results within 300–500 ms.
+🧑 Buyers (regular Telegram users)
 
-Sort persists when paging and when navigating back from PDP.
+Each buyer has their own shop dashboard in the mini app.
+Even if they haven’t created a shop, they will see:
 
-Notes: Persist last query/sort/category in sessionStorage.
+Universal Shop – a global marketplace open to everyone.
 
-Checkout UX
+Shops they’ve joined by invitation – e.g. a friend’s or a local seller’s shop they were added to or invited by.
 
-Deliverables: Checkout form step with inline validation; confirmation screen.
+They can open and browse these shops separately:
 
-AC:
+“Universal Shop” → all public listings (no checkout, just contact sellers).
 
-Required: phone, address line(s), city, note/specialReference (optional).
+“Joined Shops” → private or local shops they were invited to, where they can buy, add to cart, and check out.
 
-“Place order” leads to Order Confirmation: order ID, items, totals, “Track order” CTA → order details page.
+🧑‍🔧 Admins (platform operators)
 
-Prevent double-submit (disable button while in-flight).
+Manage tenants (shops), handle abuse, and approve listings.
 
-Notes: If you already store phone/address in Profile, prefill & let users edit.
+Track metrics like orders, leads, and active tenants.
 
-Error/Empty States & Loaders
+Control platform-wide settings and categories.
 
-Deliverables: Skeletons for product cards, PDP, orders; empty states for catalog/cart/orders; toasts for success/error.
+3. The two selling modes
+🅰️ Local (Private) Shops
 
-AC:
+Each merchant owns a private store.
 
-No blank screens during load or error.
+Customers can:
 
-“Retry” button appears on API failure.
+View products,
 
-401 Auto-Reauth
+Add to cart,
 
-Deliverables: API layer that intercepts 401 → silently re-run TMA login (or prompt to re-open in Telegram if initData missing).
+Checkout and pay (future: Telebirr/Stripe integration),
 
-AC:
+Track orders.
 
-Shopper never gets stuck due to expired session; minimal friction in TG webview.
+The full e-commerce flow is supported.
 
-P1 — Usability & Mobile Excellence
+The merchant sees and manages orders and inventory per shop.
 
-Goal: It feels native inside Telegram (desktop & mobile).
+🅱️ Universal Shop
 
-Back Button & Navigation
+A shared, global marketplace of all public products.
 
-Deliverables: Sync Telegram’s back button with router; handle close behavior.
+Everyone can browse products from all shops.
 
-AC:
+Instead of checkout, buyers can:
 
-In PDP, back returns to prior grid position.
+Message the seller directly in Telegram, or
 
-In root tabs, back either switches tabs correctly or closes mini app when appropriate.
+Call the seller using the merchant’s public phone number.
 
-Haptics & Toasts
+It’s a lead-generation space — no payments here.
 
-Deliverables: Use Telegram.WebApp.HapticFeedback for “add to cart”, “success”, “error”.
+Each click (“message” or “call”) is logged for analytics as a Contact Intent.
 
-AC:
+4. User experience inside the Mini App
 
-Subtle haptic bump on add; success vibration on order placed.
+When a user opens the mini app:
 
-Safe-Area & Responsive Layout
+They see a Shop List view with:
 
-Deliverables: Respect notches and bottom bars; ensure bottom nav isn’t obscured.
+“🌍 Universal Shop”
 
-AC:
+“🛒 My Shops” (if they are a merchant)
 
-iOS/Android safe areas handled; no clipped CTA buttons.
+“🤝 Joined Shops” (shops they were invited to)
 
-Accessibility & Keyboard
+They can open any shop separately.
 
-Deliverables: Focus states, large touch targets, numeric keyboards for numbers, dismiss keyboard on scroll.
+Inside each shop:
 
-AC:
+Local shops show “Add to Cart” and “Buy” options.
 
-Forms usable one-handed on mobile; no hidden inputs under keyboard.
+Universal shop shows “Message Seller” or “Call Seller”.
 
-P2 — Addresses, Favorites, Coupons (Commerce Enhancers)
+This structure keeps the user’s role clear:
 
-Goal: Repeat shoppers move faster; AOV uplift.
+Universal Shop → discover all products.
 
-Saved Addresses
+Joined Shop → participate in private/local shops.
 
-Deliverables: Profile → Address Book CRUD; pick on checkout.
+Owned Shop → manage and sell your own items.
 
-AC:
+5. Communication between buyers and sellers
 
-Default address auto-selected; can add/edit/delete; checkout reflects selection.
+“Message Seller” opens a Telegram deep link to the seller’s bot.
 
-Favorites / Wishlist
+“Call Seller” uses the merchant’s public phone number.
 
-Deliverables: Heart icon on product card/PDP; “Favorites” filter/tab.
+Messages can be:
 
-AC:
+Direct (buyer messages the seller), or
 
-Toggles optimistically; persists across sessions.
+Relayed through the platform bot (for privacy).
 
-Coupons / Promo Codes
+Contact actions are logged to track engagement and prevent spam.
 
-Deliverables: Input at checkout; apply/remove; display savings & new total.
+6. Shop membership & invitations
 
-AC:
+Merchants can invite users to join their shop as customers, helpers, or collaborators.
 
-Invalid codes give clear errors; idempotent server-side calculation.
+Each invited user sees that shop appear automatically in their “Joined Shops” list inside the mini app.
 
-P3 — Payments & Fulfillment Visibility
+Invitations are sent via bot links (/join_<shopId>).
 
-Goal: Real payment and visible order journey.
+Joined users can:
 
-Payment Path
-Pick one now and stub UI accordingly:
+Browse that shop’s private catalog,
 
-Telegram Stars (digital) or
+Order from it,
 
-PSP (e.g., Stripe / local provider) for physical goods (hosted checkout / openInvoice).
+Or message the merchant directly.
 
-AC:
+This allows private groups (e.g., community markets or small resellers) to operate within Telegram without exposing everything publicly.
 
-Pay button shows correct flow; failure/success returns to confirmation & updates order status.
+7. What the MVP will deliver
 
-Order Status & Tracking
+✅ For merchants
 
-Deliverables: Order timeline (Pending → Processing → Shipped → Delivered) + optional tracking link.
+Create a shop, add products, manage stock, toggle visibility (local/universal).
 
-AC:
+See orders and buyer contact intents.
 
-Status labels & timestamps shown in Order Detail; “Track package” opens external link if present.
+Optionally publish items globally.
 
-Bot Notifications
+✅ For buyers
 
-Deliverables: On order placed and on status change, send Telegram message.
+See their “Shop List” (Universal + joined shops).
 
-AC:
+Browse, order (in joined/local shops), or contact (in universal).
 
-Shopper receives timely push via bot with deep links back into mini app.
+Manage profile and addresses.
 
-P4 — Admin-lite (Optional if already using bot admin)
+✅ For admins
 
-Goal: Minimal web admin to reduce friction.
+Manage all tenants, categories, and product visibility.
 
-Products list with edit price/stock, upload images.
+View analytics for orders and contacts.
 
-Orders table (filter by status/date), update status with note.
+8. Future expansion roadmap
 
-Basic analytics: views, add-to-cart, checkout started/completed.
+After the Universal Shop and multi-shop access are stable:
 
-P5 — Performance & Quality
+Add per-tenant Telegram bots — each shop can have its own bot.
 
-Goal: Fast, stable, observable.
+Add encrypted bot token storage (secure, per shop).
 
-Perf: Code splitting per route; image optimization (srcset, lazy load), cache lists; debounce search.
+Support multi-bot webhook routing on one backend.
 
-Quality: Central error boundary; API retry policy; Sentry/LogRocket (or similar).
+Add merchant subscriptions and billing (Plan model).
 
-i18n: Extract strings for future locales.
+Enable in-app payments (Telebirr, Stripe, Chapa).
 
-Telemetry: Track events (view_product, add_to_cart, start_checkout, purchase).
+Launch analytics dashboard and admin web panel.
 
-Component & Route Map (frontend)
+💡 In summary
 
-/ (Shop): CategoryTabs, SearchBar, SortMenu, ProductGrid, CartBadge
+TG-Shop is evolving into a Telegram-native multi-shop ecosystem where:
 
-/product/:id: ProductGallery, PriceBlock, StockBadge, AddToCart, BuyNow, StickyMiniCart
+Every user has access to Universal Shop (public)
 
-/cart: CartLines, QtyStepper, SummaryCard, CheckoutCTA
+And Joined Shops (private or local)
 
-/checkout: AddressForm (prefilled), PhoneForm, CouponBox, PlaceOrder
+Merchants can run their own shop,
 
-/orders: OrdersList (status chips, date range filter)
+Buyers can explore, buy, or message sellers — all inside Telegram,
 
-/orders/:orderId: OrderSummary, Timeline, TrackingLink
-
-/profile: ProfileForm, AddressBook (CRUD), Preferences
-
-API & State (thin guide)
-
-API layer: api.ts with fetchJson that handles: base URL, credentials: 'include', 401 intercept + TMA reauth, retries (idempotent only).
-
-Caching: Keep catalog lists in memory per category+query+sort; invalidate on product changes.
-
-Optimistic updates: Add/remove cart, favorite toggles; reconcile from server.
-
-Acceptance Test Checklist (P0)
-
- Open app from Desktop & Mobile TG; theme matches Telegram.
-
- Browse categories; switch tabs preserves scroll & page.
-
- Search + sort work together; back restores inputs and grid position.
-
- PDP shows correct price/currency, stock; “Add” and “Buy now” both work.
-
- Cart qty stepper is instant; totals correct; remove line works.
-
- Checkout validates required fields; prevents double-submit; shows confirmation.
-
- 401 triggers silent reauth; no dead-end states.
-
- Error screens have Retry; toasts appear for success/error.
-
- Works offline-tolerant enough to show helpful messages (no white screens).
-
-“Do Next” — Week-by-week plan
-
-Week 1 (P0 focus)
-
-PDP route + components
-
-Search + sort + persistence
-
-Loaders/empty/error + toasts
-
-401 auto-reauth in api.ts
-
-Week 2 (P0 finish + P1 polish)
-
-Checkout form + confirmation screen
-
-Back button integration (TG + browser)
-
-Haptics & safe-area polish
-
-QA pass against acceptance list
-
-Week 3 (P2 foundations)
-
-Address book (Profile + Checkout pick)
-
-Favorites MVP
-
-Coupon UI + server validation hooks
-
-Week 4 (P3 decision & scaffolding)
-
-Choose payment path; stub Pay button flows
-
-Order timeline + tracking link
-
-Bot notifications for order events
-
-Small, high-impact tickets you can pick up today
-
-Persist last category/search/sort with sessionStorage keys cat, q, sort.
-
-Add SkeletonCard and SkeletonList to grid and orders.
-
-Toast utility (useToast) and standard messages.
-
-API 401 interceptor that calls a reauth() helper which re-runs initData check.
-
-Sticky mini-cart on PDP (position: sticky; bottom bar in safe area).
-
-If you want, I can draft the minimal code scaffolding for:
-
-/product/:id page structure (with a basic gallery and sticky mini-cart), and
-
-A shared api.ts with 401 auto-reauth + toast/error handling.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-..................... Plan .....................
-
-
-Got it. Here’s the concise “what’s needed first” to build a multi‑tenant Telegram store builder (like @sellzbot) — no code.
-
-1) Product scope & roles
-
-Roles: Store Owner (tenant admin), Staff (optional), Shopper (end user), Platform Admin (you).
-
-Value: Owners create a shop, add products, receive orders, view analytics; shoppers browse/buy inside Telegram.
-
-2) Core user journeys (MVP)
-
-Owner onboarding: Start bot → register → create shop (name, slug, currency) → connect payment method → add first product → share link.
-
-Catalog & checkout: Shoppers open mini app → browse/search → add to cart → checkout (contact + address) → order confirmation → notifications.
-
-Order management: Owner views orders → update status (pending, processing, shipped, delivered) → buyer gets updates.
-
-Product management: CRUD products, categories, stock, pricing, images.
-
-Analytics (initial): Sales, orders, top products, conversion basics.
-
-3) Telegram integration
-
-Bot: Commands for onboarding, quick actions, and notifications (order created/status changed).
-
-Mini App: WebApp for storefront, cart, checkout, orders, profile.
-
-Deep links: startapp=<shop_slug> to route shoppers to the right store.
-
-Webhooks: Receive bot updates; send proactive messages.
-
-4) Multi‑tenancy essentials (from day 1)
-
-Tenant resolution: From startapp slug (and optionally header/path).
-
-Data scoping: Every key table carries tenantId. All queries filtered by tenant.
-
-Theming: Per-tenant logo/colors/settings to brand the shop.
-
-Media: Per-tenant storage paths.
-
-5) Payments & fulfillment (choose now)
-
-Payment strategy: Telegram Stars (digital) or external PSP (Stripe/local). Start with Cash on Delivery or Bank transfer if payments aren’t ready.
-
-Shipping: Flat-rate or simple rules initially; address capture in checkout.
-
-Receipts: Bot message + in‑app confirmation.
-
-6) Admin & operations
-
-Owner console: Inside mini app (or bot panels) to manage products, orders, settings.
-
-Platform admin: View tenants, suspend/enable, basic usage metrics.
-
-Support hooks: Link to support bot, FAQ, contact email/phone.
-
-7) Analytics (phase 1)
-
-Per shop: Revenue, orders, AOV, top products, daily/weekly charts.
-
-Funnel basics: Sessions → add to cart → checkout → purchase.
-
-8) Legal & policy
-
-Policies per shop: Terms, Returns, Privacy (owner-supplied templates).
-
-Data protection: PII (address/phone) handling, deletion on request.
-
-Content rules: Prohibited items enforcement at platform level.
-
-9) Non‑functional requirements
-
-Security: HMAC verification of Telegram init data; session cookies; rate limits; input validation.
-
-Reliability: Idempotent checkout; retries; error/empty states.
-
-Performance: Fast loads, image optimization, caching.
-
-Observability: Logs, error tracking, basic audit (who changed price/stock).
-
-10) Go‑to‑market milestones
-
-Single shop MVP (end‑to‑end flow working).
-
-Add tenant scaffolding (slug routing, data scoping, theming).
-
-Owner onboarding flow (self‑serve shop creation).
-
-Payments/fulfillment path (even if manual/COD first).
-
-Analytics v1 and notifications.
-
-Platform admin controls and basic abuse controls.
+And the platform grows into a complete marketplace + mini-app network.
