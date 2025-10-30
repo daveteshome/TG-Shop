@@ -41,10 +41,13 @@ export default function DrawerMenu({ open, onClose }: Props) {
 
         <nav style={{ padding: 8, display: "grid", gap: 4 }}>
           <Item to="/">🏠 Home</Item>
-          <Item to="/categories">🗂️ Shop by Category</Item>
+          <Item to="/universal">🌍 Universal Shop</Item>
+          <Item to="/shops?joined=1">🤝 Shops I Joined</Item>
+          <Item to="/shops?mine=1">🏪 My Shop(s)</Item>
           <Item to="/orders">📦 My Orders</Item>
           <Item to="/cart">🛒 Cart</Item>
           <Item to="/profile">👤 Profile</Item>
+          <Item to="/settings">⚙️ Settings</Item>
         </nav>
 
         <div style={{ marginTop: "auto", padding: 12 }}>

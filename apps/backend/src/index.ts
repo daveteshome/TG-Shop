@@ -2,6 +2,7 @@
 import 'dotenv/config';
 import { createApp } from './app';
 
+
 (async () => {
   try {
     const { start } = createApp();
