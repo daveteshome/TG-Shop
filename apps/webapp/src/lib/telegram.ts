@@ -1,12 +1,9 @@
-// apps/webapp/src/lib/telegram.ts
-import { retrieveLaunchParams } from '@telegram-apps/sdk';
-
 let _cachedRaw: string | null = null;
 let _cachedDecoded: string | null = null;
 
 function setCache(raw: string) {
   _cachedRaw = raw;
-  try { sessionStorage.setItem('tg_init_data_raw', raw); } catch {}
+  try { sessionStorage.setItem("tg_init_data_raw", raw); } catch {}
 }
 
 export function getTelegramWebApp(): any | null {
@@ -14,82 +11,48 @@ export function getTelegramWebApp(): any | null {
   return (window as any).Telegram?.WebApp || null;
 }
 
-// apps/webapp/src/lib/telegram.ts
 export function getInitDataRaw(): string | null {
-  if (_cachedRaw) {
-    return _cachedRaw;
-  }
+  if (_cachedRaw) return _cachedRaw;
 
-  // 1) Inside Telegram WebApp (desktop and some mobile)
   try {
-    // @ts-ignore
-    const tg = (window as any).Telegram?.WebApp;
-    
-    if (tg?.initData && typeof tg.initData === 'string' && tg.initData.length > 0) {
-      _cachedRaw = tg.initData;
-      try { 
-        if (_cachedRaw) {
-          sessionStorage.setItem('tg_init_data_raw', _cachedRaw); 
-        }
-      } catch {}
-      return _cachedRaw;
+    const tg = getTelegramWebApp();
+    const tgInit = tg?.initData;
+    if (tgInit && typeof tgInit === "string" && tgInit.length > 0) {
+      setCache(tgInit);
+      return tgInit;
     }
-  } catch (error) {
-    console.error('getInitDataRaw - Error accessing WebApp object:', error);
-  }
+  } catch {}
 
-  // 2) Mobile Telegram: Extract from URL hash (tgWebAppData)
   try {
-    const hash = window.location.hash.substring(1);
-    if (hash) {
-      const params = new URLSearchParams(hash);
-      const tgWebAppData = params.get('tgWebAppData');
-      
-      if (tgWebAppData) {
-        _cachedRaw = tgWebAppData;
-        try { 
-          if (_cachedRaw) {
-            sessionStorage.setItem('tg_init_data_raw', _cachedRaw); 
-          }
-        } catch {}
-        return _cachedRaw;
-      }
+    const hash = window.location.hash.slice(1);
+    const params = new URLSearchParams(hash);
+    const tgWebAppData = params.get("tgWebAppData");
+    if (tgWebAppData) {
+      setCache(tgWebAppData);
+      return tgWebAppData;
     }
-  } catch (error) {
-    console.error('getInitDataRaw - Error parsing URL hash:', error);
-  }
+  } catch {}
 
-  // 3) Additional fallback: Check for initData in other URL parts
   try {
-    const searchParams = new URLSearchParams(window.location.search);
-    const initData = searchParams.get('tgWebAppData') || searchParams.get('initData');
-    
+    const search = new URLSearchParams(window.location.search);
+    const initData = search.get("tgWebAppData") || search.get("initData");
     if (initData) {
-      _cachedRaw = initData;
-      try { 
-        if (_cachedRaw) {
-          sessionStorage.setItem('tg_init_data_raw', _cachedRaw); 
-        }
-      } catch {}
-      return _cachedRaw;
+      setCache(initData);
+      return initData;
     }
-  } catch (error) {
-    console.error('getInitDataRaw - Error parsing URL search params:', error);
-  }
+  } catch {}
 
-  // 4) Session storage fallback
   try {
-    const stored = sessionStorage.getItem('tg_init_data_raw');
+    const stored = sessionStorage.getItem("tg_init_data_raw");
     if (stored) {
       _cachedRaw = stored;
-      return _cachedRaw;
+      return stored;
     }
-  } catch (error) {
-    console.error('getInitDataRaw - Error accessing session storage:', error);
-  }
-  
+  } catch {}
+
   return null;
 }
+
 export function getInitData(): string | null {
   if (_cachedDecoded) return _cachedDecoded;
   const raw = getInitDataRaw();
@@ -98,19 +61,9 @@ export function getInitData(): string | null {
   return _cachedDecoded;
 }
 
-export function isInsideTelegramContainer(): boolean {
-  // Check if we have initData (either from WebApp object or URL)
-  const hasInitData = !!getInitDataRaw();
-  
-  // Also check for other Telegram WebApp features
-  const tg = getTelegramWebApp();
-  const hasTelegramObject = !!tg;
-  
-  // Check if we're in a Telegram environment by looking at the URL
-  const hasTelegramUrlParams = window.location.hash.includes('tgWebAppData') || 
-                              window.location.search.includes('tgWebAppData');
-  
-  return hasInitData || hasTelegramObject || hasTelegramUrlParams;
+export function ensureInitDataCached(): string | null {
+  const got = getInitDataRaw();
+  return got;
 }
 
 export function ready() {

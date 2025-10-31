@@ -1,49 +1,79 @@
-// src/routes/Home.tsx
 import React from "react";
 import { useNavigate } from "react-router-dom";
-
-const cardBase: React.CSSProperties = {
-  border: "1px solid rgba(0,0,0,.05)",
-  borderRadius: 14,
-  padding: "16px 14px",
-  background: "#fff",
-  boxShadow: "0 2px 8px rgba(15,23,42,.03)",
-  cursor: "pointer",
-};
+import { ready } from "../lib/telegram";
 
 export default function Home() {
-  const nav = useNavigate();
+  const navigate = useNavigate();
+
+  React.useEffect(() => {
+    ready();
+  }, []);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <h2 style={{ margin: "4px 0 8px" }}>Welcome 👋</h2>
-      <p style={{ margin: 0, opacity: 0.6 }}>
-        Choose what you want to open.
-      </p>
+    <div style={page}>
+      {/* 🌍 Universal Shop */}
+      <section style={card}>
+        <h2 style={title}>🌍 Universal Shop</h2>
+        <p style={subtitle}>Browse all public products</p>
+        <button onClick={() => navigate("/universal")} style={btn}>
+          Open Universal
+        </button>
+      </section>
 
-      {/* 1. Universal */}
-      <div onClick={() => nav("/universal")} style={cardBase}>
-        <div style={{ fontSize: 20 }}>🌍 Universal Shop</div>
-        <div style={{ opacity: 0.7, marginTop: 4 }}>
-          Browse all public products
-        </div>
-      </div>
+      {/* 🏪 My Shops */}
+      <section style={card}>
+        <h2 style={title}>🏪 My Shops</h2>
+        <p style={subtitle}>View or manage the shops you created</p>
+        <button onClick={() => navigate("/shops")} style={btn}>
+          Open My Shops
+        </button>
+      </section>
 
-      {/* 2. My shops */}
-      <div onClick={() => nav("/shops?mine=1")} style={cardBase}>
-        <div style={{ fontSize: 20 }}>🏪 My Shops</div>
-        <div style={{ opacity: 0.7, marginTop: 4 }}>
-          Shops you created / own
-        </div>
-      </div>
-
-      {/* 3. Joined shops */}
-      <div onClick={() => nav("/shops?joined=1")} style={cardBase}>
-        <div style={{ fontSize: 20 }}>🤝 Joined Shops</div>
-        <div style={{ opacity: 0.7, marginTop: 4 }}>
-          Shops you were invited to
-        </div>
-      </div>
+      {/* 🤝 Joined Shops */}
+      <section style={card}>
+        <h2 style={title}>🤝 Joined Shops</h2>
+        <p style={subtitle}>View shops you’ve joined by invitation</p>
+        <button onClick={() => navigate("/shops")} style={btn}>
+          View Joined Shops
+        </button>
+      </section>
     </div>
   );
 }
+
+/* --- styling --- */
+const page: React.CSSProperties = {
+  padding: "10px 12px 90px",
+  display: "grid",
+  gap: 16,
+};
+
+const card: React.CSSProperties = {
+  background: "var(--tg-theme-secondary-bg-color, #fff)",
+  borderRadius: 14,
+  padding: "12px 14px",
+  boxShadow: "0 1px 3px rgba(0,0,0,.06)",
+};
+
+const title: React.CSSProperties = {
+  fontSize: 17,
+  fontWeight: 700,
+  margin: "0 0 6px",
+};
+
+const subtitle: React.CSSProperties = {
+  fontSize: 14,
+  opacity: 0.8,
+  margin: "0 0 10px",
+};
+
+const btn: React.CSSProperties = {
+  display: "inline-block",
+  padding: "8px 14px",
+  borderRadius: 10,
+  border: "1px solid rgba(0,0,0,.15)",
+  background: "var(--tg-theme-button-color, #2481cc)",
+  color: "var(--tg-theme-button-text-color, #fff)",
+  textDecoration: "none",
+  cursor: "pointer",
+};

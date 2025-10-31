@@ -1,5 +1,5 @@
 // src/App.tsx
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { Routes, Route, useLocation, useParams } from "react-router-dom";
 
 import Home from "./routes/Home";
@@ -11,11 +11,14 @@ import Categories from "./routes/Categories";
 import Products from "./routes/Products";
 import Universal from "./routes/Universal";
 import Shop from "./routes/Shop";
-import ShopList from "./routes/ShopList"; // you already have it in src/routes
+import ShopList from "./routes/ShopList";
 import ErrorBoundary from "./components/common/ErrorBoundary";
 
 import HeaderBar from "./components/layout/HeaderBar";
 import DrawerMenu from "./components/DrawerMenu";
+
+// 👇 import these
+import { ensureInitDataCached, ready } from "./lib/telegram";
 
 const appStyle: React.CSSProperties = {
   maxWidth: 860,
@@ -33,6 +36,14 @@ export default function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const loc = useLocation();
 
+  // 👉 run once when App mounts
+  useEffect(() => {
+    // make Telegram webview "ready"
+    ready();
+    // capture whatever initData is available RIGHT NOW
+    ensureInitDataCached();
+  }, []);
+
   // figure out title from current route
   const title = useMemo(() => {
     if (loc.pathname === "/") return "Home";
@@ -41,7 +52,7 @@ export default function App() {
     if (loc.pathname.startsWith("/orders")) return "My Orders";
     if (loc.pathname.startsWith("/cart")) return "Cart";
     if (loc.pathname.startsWith("/profile")) return "Profile";
-    if (loc.pathname.startsWith("/shop/")) return "Shop"; // will be refined inside the page
+    if (loc.pathname.startsWith("/shop/")) return "Shop";
     return "TG Shop";
   }, [loc.pathname]);
 
@@ -58,7 +69,6 @@ export default function App() {
             <Route path="/shops" element={<ShopList />} />
             <Route path="/shop/:slug" element={<ShopRoute />} />
             <Route path="/cart" element={<Cart />} />
-    
             <Route path="/categories" element={<Categories />} />
             <Route path="/products" element={<Products />} />
             <Route path="/profile" element={<Profile />} />
@@ -71,6 +81,5 @@ export default function App() {
 
 function ShopRoute() {
   const { slug } = useParams();
-  // we keep it simple: Shop itself will fetch name and may show it
   return <Shop slug={slug!} />;
 }
