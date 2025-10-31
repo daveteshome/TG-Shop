@@ -266,6 +266,49 @@ api.get('/universal', async (req, res, next) => {
 });
 
 
+// CREATE PRODUCT
+api.post('/shop/:slug/products', resolveTenant, async (req: any, res, next) => {
+  try {
+    const tenantId = req.tenantId!;
+    const userId = req.userId!;
+    const {
+      title,
+      price,
+      currency = "ETB",
+      description = null,
+      categoryId = null,
+      stock = 0,
+      active = true,
+    } = req.body || {};
+
+    if (!title || String(title).trim().length < 2) {
+      return res.status(400).json({ error: "title_required" });
+    }
+    if (price == null || isNaN(Number(price))) {
+      return res.status(400).json({ error: "price_required" });
+    }
+
+    const p = await db.product.create({
+      data: {
+        tenantId,
+        title: String(title).trim(),
+        description: description ? String(description) : null,
+        price: Number(price),
+        currency: currency,
+        categoryId: categoryId ? String(categoryId) : null,
+        stock: Number(stock) || 0,
+        active: !!active,
+        // createdBy: userId, // only if you have it
+      },
+    });
+
+    res.json({ product: p });
+  } catch (e) {
+    next(e);
+  }
+});
+
+
 // TENANT PRODUCTS by slug
 // TENANT PRODUCTS by slug
 api.get('/shop/:slug/products', resolveTenant, async (req: ReqWithTenant, res, next) => {
