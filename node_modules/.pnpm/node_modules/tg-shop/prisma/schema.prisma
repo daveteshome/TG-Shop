@@ -105,6 +105,18 @@ enum ShipmentStatus {
   returned
 }
 
+enum ShopStatus {
+  open
+  closed
+  paused
+}
+
+enum DeliveryMode {
+  delivery
+  pickup
+  both
+}
+
 /// ===== Core Multi-tenant Entities =====
 
 model Tenant {
@@ -116,7 +128,21 @@ model Tenant {
 
   // Public profile / universal marketplace controls
   publicPhone      String?
-  publishUniversal Boolean @default(false)
+  publishUniversal Boolean      @default(false)
+
+  // NEW: shop public/profile fields
+  description        String?       // short text for header / shop card
+  aboutText          String?       // longer text for "About" tab
+  location           String?       // e.g. "Addis Ababa"
+  deliveryRules      String?       // e.g. "Delivery 200 ETB", "Pickup only"
+  status             ShopStatus    @default(open)
+  deliveryMode       DeliveryMode  @default(both)
+  logoUrl            String?
+  bannerUrl          String?
+  defaultCurrency    Currency?
+  minOrderAmount     Decimal?      @db.Decimal(10, 2)
+  businessHours      Json?         // flexible open/close per day
+  publicTelegramLink String?       // public channel/group/bot for buyers
 
   // Per-tenant Telegram config
   botToken     String?
@@ -146,8 +172,6 @@ model Tenant {
   carts           Cart[]
   orders          Order[]
   shipments       Shipment[]
-
-  // Extras
   contactIntents  ContactIntent[]
   blockList       BlockList[]
   memberships     Membership[]
@@ -158,7 +182,24 @@ model Tenant {
   reports         Report[]
   membershipAudit MembershipAudit[]
 
+  // if you add pinned model ↓
+  pinnedProducts   PinnedProduct[]
+
   @@index([slug])
+}
+
+model PinnedProduct {
+  id        String   @id @default(cuid())
+  tenantId  String
+  productId String
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, productId])
+  @@index([tenantId, position])
 }
 
 model User {
@@ -260,6 +301,8 @@ model Product {
   contactIntents ContactIntent[]
   views          ProductView[]
   reports        Report[]
+
+  pinnedInShops  PinnedProduct[]
 
   @@unique([tenantId, sku])
   @@index([tenantId])

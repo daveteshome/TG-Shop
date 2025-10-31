@@ -9,6 +9,7 @@ router.use(telegramAuth);
 
 // GET /api/shops/list  → returns { universal, myShops, joinedShops }
 router.get("/shops/list", async (req: any, res, next) => {
+  console.log("on routs.ts page 12 [/shops/list] userId=");
   try {
     const userId = req.userId!;
     const owned = await db.membership.findMany({

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";          // 👈 add this
 import { api } from "../lib/api/index";
 import { createShop } from "../lib/api";
 
@@ -13,11 +14,14 @@ export default function ShopList() {
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
 
+  const navigate = useNavigate();                        // 👈 here
+
   useEffect(() => {
     (async () => {
       setLoading(true);
       setErr(null);
       try {
+        // ✅ keep your original endpoint
         const r = await api<{ universal: any; myShops: Tenant[]; joinedShops: Tenant[] }>(
           "/shops/list"
         );
@@ -40,7 +44,9 @@ export default function ShopList() {
     try {
       const res = await createShop(newName.trim());
       const slug = res.tenant.slug;
-      window.location.href = `/shop/${slug}`;
+      // ❌ window.location.href = ...
+      // ✅ use router, same as universal
+      navigate(`/shop/${slug}`);
     } catch (e: any) {
       setErr(e?.message || "create_failed");
     } finally {
@@ -77,9 +83,11 @@ export default function ShopList() {
         <ul style={list}>
           {owned.map((s) => (
             <li key={s.id}>
-              <a href={`/shop/${s.slug}`} style={linkBtn}>
+              {/* ❌ <a href=...> */}
+              {/* ✅ button + navigate, like universal */}
+              <button onClick={() => navigate(`/shop/${s.slug}`)} style={linkBtnButton}>
                 {s.name}
-              </a>
+              </button>
             </li>
           ))}
         </ul>
@@ -133,9 +141,14 @@ const list: React.CSSProperties = {
   gap: 6,
 };
 
-const linkBtn: React.CSSProperties = {
+const linkBtnButton: React.CSSProperties = {
   textDecoration: "underline",
   color: "inherit",
+  background: "transparent",
+  border: "none",
+  padding: 0,
+  fontSize: 14,
+  cursor: "pointer",
 };
 
 const muted: React.CSSProperties = { opacity: 0.65 };

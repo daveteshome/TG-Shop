@@ -28,7 +28,7 @@ import contactRouter from "./routes/contact";
 import shopRouter from "./routes/shop";
 import shopsRouter from "./routes/shops";
 import membersRouter from "./routes/members";
-
+import { publicTenantRouter } from "./routes/publicTenant";
 
 export function createApp() {
   const app = express();
@@ -43,7 +43,7 @@ export function createApp() {
   app.use(cors({
     origin: [
       ENV.WEBAPP_URL,
-      'https://ec4ed7b1e4e7.ngrok-free.app', //front
+      'https://fd067023c4a2.ngrok-free.app', //front
       'https://web.telegram.org',
       'https://oauth.telegram.org',
       /\.t\.me$/,
@@ -59,6 +59,8 @@ export function createApp() {
   // Body limits (prevent abuse)
   app.use(express.json({ limit: '10mb' })); // Increased limit for potential image uploads
   app.use(express.urlencoded({ extended: false, limit: '256kb' }));
+  
+
 
   // Rate limit API (uses userId if available, else IPv6-safe IP key)
   const apiLimiter = rateLimit({
@@ -89,6 +91,7 @@ export function createApp() {
   app.use('/api/shop', shopRouter);
   app.use('/api', shopsRouter);     // new: shops list + create tenant
   app.use('/api', membersRouter);   // new: invites + members mgmt
+  app.use("/public", publicTenantRouter);
 
   // ----- Telegram Bot -----
   bot.use(ensureUser());

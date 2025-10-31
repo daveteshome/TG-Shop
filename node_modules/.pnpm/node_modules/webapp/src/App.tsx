@@ -1,6 +1,6 @@
 // src/App.tsx
 import React, { useState, useMemo, useEffect } from "react";
-import { Routes, Route, useLocation, useParams } from "react-router-dom";
+import { Routes, Route, useLocation } from "react-router-dom";
 
 import Home from "./routes/Home";
 import Cart from "./routes/Cart";
@@ -17,7 +17,6 @@ import ErrorBoundary from "./components/common/ErrorBoundary";
 import HeaderBar from "./components/layout/HeaderBar";
 import DrawerMenu from "./components/DrawerMenu";
 
-// 👇 import these
 import { ensureInitDataCached, ready } from "./lib/telegram";
 
 const appStyle: React.CSSProperties = {
@@ -36,15 +35,11 @@ export default function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const loc = useLocation();
 
-  // 👉 run once when App mounts
   useEffect(() => {
-    // make Telegram webview "ready"
     ready();
-    // capture whatever initData is available RIGHT NOW
     ensureInitDataCached();
   }, []);
 
-  // figure out title from current route
   const title = useMemo(() => {
     if (loc.pathname === "/") return "Home";
     if (loc.pathname.startsWith("/universal")) return "Universal Shop";
@@ -67,7 +62,8 @@ export default function App() {
             <Route path="/" element={<Home />} />
             <Route path="/universal" element={<Universal />} />
             <Route path="/shops" element={<ShopList />} />
-            <Route path="/shop/:slug" element={<ShopRoute />} />
+            {/* 👇 just render Shop */}
+            <Route path="/shop/:slug" element={<Shop />} />
             <Route path="/cart" element={<Cart />} />
             <Route path="/categories" element={<Categories />} />
             <Route path="/products" element={<Products />} />
@@ -77,9 +73,4 @@ export default function App() {
       </main>
     </div>
   );
-}
-
-function ShopRoute() {
-  const { slug } = useParams();
-  return <Shop slug={slug!} />;
 }

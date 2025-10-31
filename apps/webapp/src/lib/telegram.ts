@@ -1,9 +1,12 @@
+// webapp/src/lib/telegram.ts
 let _cachedRaw: string | null = null;
 let _cachedDecoded: string | null = null;
 
 function setCache(raw: string) {
   _cachedRaw = raw;
-  try { sessionStorage.setItem("tg_init_data_raw", raw); } catch {}
+  try {
+    sessionStorage.setItem("tg_init_data_raw", raw);
+  } catch {}
 }
 
 export function getTelegramWebApp(): any | null {
@@ -12,8 +15,10 @@ export function getTelegramWebApp(): any | null {
 }
 
 export function getInitDataRaw(): string | null {
+  // 1) if we already have it in memory, use it
   if (_cachedRaw) return _cachedRaw;
 
+  // 2) if we are REALLY inside Telegram, ALWAYS prefer fresh Telegram data
   try {
     const tg = getTelegramWebApp();
     const tgInit = tg?.initData;
@@ -23,6 +28,7 @@ export function getInitDataRaw(): string | null {
     }
   } catch {}
 
+  // 3) sometimes Telegram passes it in the URL (tgWebAppData=...)
   try {
     const hash = window.location.hash.slice(1);
     const params = new URLSearchParams(hash);
@@ -33,15 +39,8 @@ export function getInitDataRaw(): string | null {
     }
   } catch {}
 
-  try {
-    const search = new URLSearchParams(window.location.search);
-    const initData = search.get("tgWebAppData") || search.get("initData");
-    if (initData) {
-      setCache(initData);
-      return initData;
-    }
-  } catch {}
-
+  // 4) ONLY AS LAST RESORT: use sessionStorage
+  //    (this is what was causing the issue for 2 different users in the same browser)
   try {
     const stored = sessionStorage.getItem("tg_init_data_raw");
     if (stored) {
@@ -57,13 +56,16 @@ export function getInitData(): string | null {
   if (_cachedDecoded) return _cachedDecoded;
   const raw = getInitDataRaw();
   if (!raw) return null;
-  try { _cachedDecoded = decodeURIComponent(raw); } catch { _cachedDecoded = raw; }
+  try {
+    _cachedDecoded = decodeURIComponent(raw);
+  } catch {
+    _cachedDecoded = raw;
+  }
   return _cachedDecoded;
 }
 
 export function ensureInitDataCached(): string | null {
-  const got = getInitDataRaw();
-  return got;
+  return getInitDataRaw();
 }
 
 export function ready() {
