@@ -7,6 +7,7 @@ import Cart from "./routes/Cart";
 import Profile from "./routes/Profile";
 import Orders from "./routes/Orders";
 import OrderDetail from "./routes/OrderDetail";
+import ProductDetail from "./routes/ProductDetail";
 import Categories from "./routes/Categories";
 import Products from "./routes/Products";
 import Universal from "./routes/Universal";
@@ -64,6 +65,7 @@ export default function App() {
             <Route path="/shops" element={<ShopList />} />
             {/* 👇 just render Shop */}
             <Route path="/shop/:slug" element={<Shop />} />
+            <Route path="/shop/:slug/p/:id" element={<ProductDetail />} />
             <Route path="/cart" element={<Cart />} />
             <Route path="/categories" element={<Categories />} />
             <Route path="/products" element={<Products />} />

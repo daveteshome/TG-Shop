@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+// apps/webapp/src/routes/Shop.tsx
+import React, { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../lib/api/index";
 import { getInitDataRaw } from "../lib/telegram";
 
@@ -10,6 +11,8 @@ type Product = {
   price: number;
   currency: string;
   photoUrl?: string | null;
+  categoryId?: string | null;
+  stock?: number | null;
 };
 
 type Tenant = {
@@ -25,25 +28,34 @@ type Category = {
 
 export default function Shop() {
   const { slug } = useParams<{ slug: string }>();
+  const nav = useNavigate();
+
   const [loading, setLoading] = useState(true);
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [err, setErr] = useState<string | null>(null);
 
-  // create product UI
+  // create / edit
   const [showCreate, setShowCreate] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
   const [categories, setCategories] = useState<Category[]>([]);
+
   const [pTitle, setPTitle] = useState("");
   const [pPrice, setPPrice] = useState("");
   const [pCurrency, setPCurrency] = useState("ETB");
   const [pCategory, setPCategory] = useState<string | null>(null);
   const [pDesc, setPDesc] = useState("");
   const [pStock, setPStock] = useState("0");
-  const [pImageFile, setPImageFile] = useState<File | null>(null); // 👈 real file, not URL
+  // 👇 create: now multiple
+  const [pImageFiles, setPImageFiles] = useState<File[]>([]);
+  // 👇 edit: keep single
+  const [pImageFileEdit, setPImageFileEdit] = useState<File | null>(null);
+
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
 
-  // load products (kept same as your working version)
   async function loadProducts(shopSlug: string) {
     setLoading(true);
     setErr(null);
@@ -58,13 +70,11 @@ export default function Shop() {
     }
   }
 
-  // initial load
   useEffect(() => {
     if (!slug) return;
     loadProducts(slug);
   }, [slug]);
 
-  // load categories (for dropdown)
   useEffect(() => {
     (async () => {
       try {
@@ -76,6 +86,7 @@ export default function Shop() {
     })();
   }, []);
 
+  // CREATE with multiple images
   async function handleCreateProduct() {
     if (!slug) return;
     if (!pTitle.trim()) {
@@ -91,34 +102,35 @@ export default function Shop() {
     setSaveErr(null);
 
     try {
-      // 1) if the user picked an image → upload to backend (R2)
-      let imageId: string | null = null;
-      if (pImageFile) {
-        const fd = new FormData();
-        fd.append("file", pImageFile);
+      const imageIds: string[] = [];
+
+      // 1) upload all selected images (if any)
+      if (pImageFiles.length > 0) {
         const initData = getInitDataRaw();
-        console.log("[UPLOAD] on shop.tsx");
 
+        // upload them one by one (simplest + ok for mini app)
+        for (const file of pImageFiles) {
+          const fd = new FormData();
+          fd.append("file", file);
 
-        const uploadRes = await fetch("/api/uploads/image", {
-          method: "POST",
-          headers: initData
-      ? {
-          Authorization: `tma ${initData}`,
+          const uploadRes = await fetch("/api/uploads/image", {
+            method: "POST",
+            headers: initData ? { Authorization: `tma ${initData}` } : undefined,
+            body: fd,
+          });
+
+          if (!uploadRes.ok) {
+            throw new Error("image_upload_failed");
+          }
+
+          const uploadJson = await uploadRes.json();
+          if (uploadJson.imageId) {
+            imageIds.push(uploadJson.imageId);
+          }
         }
-      : undefined,
-          body: fd,
-        });
-        console.log("below if ");
-        if (!uploadRes.ok) {
-          console.log("inside if if ");
-          throw new Error("image_upload_failed");
-        }
-        const uploadJson = await uploadRes.json();
-        imageId = uploadJson.imageId || null;
       }
 
-      // 2) create product (JSON)
+      // 2) create product
       await api(`/shop/${slug}/products`, {
         method: "POST",
         headers: {
@@ -132,11 +144,12 @@ export default function Shop() {
           categoryId: pCategory,
           stock: Number(pStock) || 0,
           active: true,
-          imageId, // 👈 pass R2 image id
+          // 👇 backend supports both imageId and imageIds, we send array
+          imageIds,
         }),
       });
 
-      // 3) refresh list
+      // 3) reload
       await loadProducts(slug);
 
       // 4) reset
@@ -146,10 +159,75 @@ export default function Shop() {
       setPDesc("");
       setPCategory(null);
       setPStock("0");
-      setPImageFile(null);
+      setPImageFiles([]); // 👈 reset images
       setShowCreate(false);
     } catch (e: any) {
       setSaveErr(e?.message || "Failed to create product");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // EDIT (keep single image for now)
+  async function handleUpdateProduct() {
+    if (!slug || !editingId) return;
+    setSaving(true);
+    setSaveErr(null);
+
+    try {
+      let imageIdToSend: string | null | undefined = undefined;
+
+      if (pImageFileEdit) {
+        const fd = new FormData();
+        fd.append("file", pImageFileEdit);
+        const initData = getInitDataRaw();
+
+        const uploadRes = await fetch("/api/uploads/image", {
+          method: "POST",
+          headers: initData ? { Authorization: `tma ${initData}` } : undefined,
+          body: fd,
+        });
+
+        if (!uploadRes.ok) {
+          throw new Error("Image upload failed");
+        }
+
+        const uploadJson = await uploadRes.json();
+        imageIdToSend = uploadJson.imageId ?? null;
+      } else {
+        imageIdToSend = undefined;
+      }
+
+      await api(`/shop/${slug}/products/${editingId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title: pTitle.trim(),
+          price: Number(pPrice),
+          currency: pCurrency,
+          description: pDesc.trim() ? pDesc.trim() : null,
+          categoryId: pCategory,
+          stock: Number(pStock) || 0,
+          active: true,
+          ...(imageIdToSend !== undefined ? { imageId: imageIdToSend } : {}),
+        }),
+      });
+
+      await loadProducts(slug);
+
+      setShowEdit(false);
+      setEditingId(null);
+      setPTitle("");
+      setPPrice("");
+      setPCurrency("ETB");
+      setPDesc("");
+      setPCategory(null);
+      setPStock("0");
+      setPImageFileEdit(null);
+    } catch (e: any) {
+      setSaveErr(e?.message || "Failed to update product");
     } finally {
       setSaving(false);
     }
@@ -171,7 +249,15 @@ export default function Shop() {
           <div style={{ fontWeight: 600, fontSize: 15 }}>{tenant?.name ?? "Shop"}</div>
           <div style={{ fontSize: 12, opacity: 0.6 }}>Private</div>
         </div>
-        <button onClick={() => setShowCreate((v) => !v)} style={smallBtn}>
+        <button
+          onClick={() => {
+            setShowCreate((v) => !v);
+            setShowEdit(false);
+            setEditingId(null);
+            setSaveErr(null);
+          }}
+          style={smallBtn}
+        >
           {showCreate ? "Cancel" : "+ Add product"}
         </button>
       </header>
@@ -195,25 +281,11 @@ export default function Shop() {
 
       {/* create form */}
       {showCreate && (
-        <div
-          style={{
-            border: "1px solid rgba(0,0,0,.05)",
-            borderRadius: 12,
-            padding: 12,
-            display: "grid",
-            gap: 8,
-            background: "#fff",
-          }}
-        >
+        <div style={panel}>
           <strong style={{ fontSize: 14 }}>New product</strong>
           {saveErr ? <div style={{ color: "crimson", fontSize: 13 }}>{saveErr}</div> : null}
 
-          <input
-            value={pTitle}
-            onChange={(e) => setPTitle(e.target.value)}
-            placeholder="Product title"
-            style={input}
-          />
+          <input value={pTitle} onChange={(e) => setPTitle(e.target.value)} placeholder="Product title" style={input} />
 
           <div style={{ display: "flex", gap: 8 }}>
             <input
@@ -229,11 +301,7 @@ export default function Shop() {
             </select>
           </div>
 
-          <select
-            value={pCategory ?? ""}
-            onChange={(e) => setPCategory(e.target.value || null)}
-            style={input}
-          >
+          <select value={pCategory ?? ""} onChange={(e) => setPCategory(e.target.value || null)} style={input}>
             <option value="">No category</option>
             {categories.map((c) => (
               <option key={c.id} value={c.id}>
@@ -249,28 +317,97 @@ export default function Shop() {
             style={{ ...input, minHeight: 70, resize: "vertical" }}
           />
 
-          <input
-            value={pStock}
-            onChange={(e) => setPStock(e.target.value)}
-            placeholder="Stock (0)"
-            style={input}
-            inputMode="numeric"
-          />
+          <input value={pStock} onChange={(e) => setPStock(e.target.value)} placeholder="Stock (0)" style={input} />
 
-          {/* 👇 actual file picker */}
+          {/* 👇 multiple images */}
           <input
             type="file"
             accept="image/*"
+            multiple
             onChange={(e) => {
-              const file = e.target.files?.[0] || null;
-              setPImageFile(file);
+              const files = e.target.files ? Array.from(e.target.files) : [];
+              setPImageFiles(files);
             }}
             style={input}
           />
+          {pImageFiles.length > 0 ? (
+            <div style={{ fontSize: 12, opacity: 0.6 }}>
+              {pImageFiles.length} image{pImageFiles.length > 1 ? "s" : ""} selected
+            </div>
+          ) : null}
 
           <button onClick={handleCreateProduct} disabled={saving} style={btn}>
             {saving ? "Saving…" : "Save product"}
           </button>
+        </div>
+      )}
+
+      {/* edit form */}
+      {showEdit && (
+        <div style={panel}>
+          <strong style={{ fontSize: 14 }}>Edit product</strong>
+          {saveErr ? <div style={{ color: "crimson", fontSize: 13 }}>{saveErr}</div> : null}
+
+          <input value={pTitle} onChange={(e) => setPTitle(e.target.value)} placeholder="Product title" style={input} />
+
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              value={pPrice}
+              onChange={(e) => setPPrice(e.target.value)}
+              placeholder="Price"
+              style={{ ...input, flex: 1 }}
+              inputMode="decimal"
+            />
+            <select value={pCurrency} onChange={(e) => setPCurrency(e.target.value)} style={{ ...input, flexBasis: 110 }}>
+              <option value="ETB">ETB</option>
+              <option value="USD">USD</option>
+            </select>
+          </div>
+
+          <select value={pCategory ?? ""} onChange={(e) => setPCategory(e.target.value || null)} style={input}>
+            <option value="">No category</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.title}
+              </option>
+            ))}
+          </select>
+
+          <textarea
+            value={pDesc}
+            onChange={(e) => setPDesc(e.target.value)}
+            placeholder="Description"
+            style={{ ...input, minHeight: 60 }}
+          />
+
+          <input value={pStock} onChange={(e) => setPStock(e.target.value)} placeholder="Stock (0)" style={input} />
+
+          {/* edit: still single image */}
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(e) => {
+              const f = e.target.files?.[0] || null;
+              setPImageFileEdit(f);
+            }}
+            style={input}
+          />
+
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={handleUpdateProduct} disabled={saving} style={btn}>
+              {saving ? "Saving…" : "Save changes"}
+            </button>
+            <button
+              onClick={() => {
+                setShowEdit(false);
+                setEditingId(null);
+                setSaveErr(null);
+              }}
+              style={smallBtn}
+            >
+              Cancel
+            </button>
+          </div>
         </div>
       )}
 
@@ -299,6 +436,10 @@ export default function Shop() {
           {products.map((p) => (
             <div
               key={p.id}
+              onClick={() => {
+                if (!slug) return;
+                nav(`/shop/${slug}/p/${p.id}`);
+              }}
               style={{
                 display: "flex",
                 gap: 12,
@@ -306,6 +447,8 @@ export default function Shop() {
                 borderRadius: 10,
                 padding: 8,
                 background: "#fff",
+                alignItems: "center",
+                cursor: "pointer",
               }}
             >
               <div
@@ -317,6 +460,7 @@ export default function Shop() {
                   backgroundImage: p.photoUrl ? `url(${p.photoUrl})` : undefined,
                   backgroundSize: "cover",
                   backgroundPosition: "center",
+                  flexShrink: 0,
                 }}
               />
               <div style={{ flex: 1 }}>
@@ -331,7 +475,25 @@ export default function Shop() {
                   {p.price} {p.currency}
                 </div>
               </div>
-              <button style={smallBtn}>Edit</button>
+              <button
+                style={smallBtn}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPTitle(p.title);
+                  setPPrice(String(p.price));
+                  setPCurrency(p.currency || "ETB");
+                  setPDesc(p.description || "");
+                  setPCategory(p.categoryId ?? null);
+                  setPStock(String(p.stock ?? 0));
+                  setPImageFileEdit(null);
+                  setEditingId(p.id);
+                  setShowEdit(true);
+                  setShowCreate(false);
+                  setSaveErr(null);
+                }}
+              >
+                Edit
+              </button>
             </div>
           ))}
         </div>
@@ -380,4 +542,13 @@ const btn: React.CSSProperties = {
   padding: "8px 12px",
   fontSize: 14,
   cursor: "pointer",
+};
+
+const panel: React.CSSProperties = {
+  border: "1px solid rgba(0,0,0,.05)",
+  borderRadius: 12,
+  padding: 12,
+  display: "grid",
+  gap: 8,
+  background: "#fff",
 };

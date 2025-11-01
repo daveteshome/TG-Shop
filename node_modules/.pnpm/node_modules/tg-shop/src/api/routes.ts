@@ -314,6 +314,7 @@ api.post("/shop/:slug/products", resolveTenant, async (req: any, res, next) => {
       stock = 0,
       active = true,
       imageId = null,    // 👈 from upload
+      imageIds,       // array
     } = req.body || {};
 
     if (!title || String(title).trim().length < 2) {
@@ -337,14 +338,22 @@ api.post("/shop/:slug/products", resolveTenant, async (req: any, res, next) => {
         },
       });
 
+      const arr: string[] =
+        Array.isArray(imageIds) && imageIds.length > 0
+          ? imageIds
+          : imageId
+          ? [imageId]
+          : [];
+
+
       // if an image was uploaded → link it
-      if (imageId) {
+      for (let i = 0; i < arr.length; i++) {
         await tx.productImage.create({
           data: {
             tenantId,
             productId: p.id,
-            imageId,          // 👈 this is the sha256 from R2
-            position: 0,
+            imageId: arr[i],
+            position: i,
           },
         });
       }
@@ -357,6 +366,194 @@ api.post("/shop/:slug/products", resolveTenant, async (req: any, res, next) => {
     next(e);
   }
 });
+
+// GET single product with all images
+api.get("/shop/:slug/products/:id", resolveTenant, async (req: any, res, next) => {
+  try {
+    const tenantId = req.tenantId!;
+    const productId = String(req.params.id);
+
+    const product = await db.product.findFirst({
+      where: { id: productId, tenantId },
+      include: {
+        images: {
+          orderBy: { position: "asc" },
+          select: { id: true, imageId: true, tgFileId: true, url: true, position: true },
+        },
+      },
+    });
+
+    if (!product) {
+      return res.status(404).json({ error: "product_not_found" });
+    }
+
+    // resolve URLs for every image
+    const imgs = [];
+    for (const img of product.images) {
+      if (img.imageId) {
+        // read mime so we get correct ext (your fixed code)
+        const imgRow = await db.image.findUnique({
+          where: { id: img.imageId },
+          select: { mime: true },
+        });
+        const ext =
+          imgRow?.mime?.includes("png") ? "png" : imgRow?.mime?.includes("webp") ? "webp" : "jpg";
+        imgs.push({
+          ...img,
+          webUrl: publicImageUrl(img.imageId, ext),
+        });
+      } else if (img.tgFileId) {
+        imgs.push({
+          ...img,
+          webUrl: `/api/products/${productId}/image`,
+        });
+      } else if (img.url) {
+        imgs.push({
+          ...img,
+          webUrl: img.url,
+        });
+      }
+    }
+
+    res.json({
+      product: {
+        id: product.id,
+        title: product.title,
+        description: product.description,
+        price: product.price,
+        currency: product.currency,
+        categoryId: product.categoryId,
+        stock: product.stock,
+      },
+      images: imgs,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+
+// UPDATE PRODUCT in a tenant
+api.patch("/shop/:slug/products/:id", resolveTenant, async (req: any, res, next) => {
+  try {
+    const tenantId = req.tenantId!;
+    const productId = String(req.params.id);
+
+    // fields that can be updated
+    const {
+      title,
+      price,
+      currency,
+      description,
+      categoryId,
+      stock,
+      active,
+      imageId, // 👈 if sent, we update the image link too
+    } = req.body || {};
+
+    // update product itself
+    const updated = await db.$transaction(async (tx) => {
+      // 1) update the product row
+      const { count } = await tx.product.updateMany({
+        where: { id: productId, tenantId },
+        data: {
+          ...(title !== undefined ? { title: String(title).trim() } : {}),
+          ...(price !== undefined ? { price: Number(price) } : {}),
+          ...(currency !== undefined ? { currency: currency } : {}),
+          ...(description !== undefined ? { description } : {}),
+          ...(stock !== undefined ? { stock: Number(stock) } : {}),
+          ...(active !== undefined ? { active: !!active } : {}),
+          ...(categoryId !== undefined
+            ? categoryId === null
+              ? { categoryId: null }
+              : { categoryId }
+            : {}),
+        },
+      });
+
+      if (count === 0) {
+        throw Object.assign(new Error("not_found"), { status: 404 });
+      }
+
+      // 2) handle image change, but only if client actually sent imageId
+      if (imageId !== undefined) {
+        // find first image for this product
+        const existing = await tx.productImage.findFirst({
+          where: { productId },
+          orderBy: { position: "asc" },
+        });
+
+        if (imageId === null) {
+          // user removed image
+          if (existing) {
+            await tx.productImage.delete({ where: { id: existing.id } });
+          }
+        } else {
+          // user set / changed image
+          if (existing) {
+            await tx.productImage.update({
+              where: { id: existing.id },
+              data: {
+                tenantId,
+                imageId,
+                tgFileId: null,
+                url: null,
+              },
+            });
+          } else {
+            await tx.productImage.create({
+              data: {
+                tenantId,
+                productId,
+                imageId,
+                position: 0,
+              },
+            });
+          }
+        }
+      }
+
+      // 3) re-read full product with image
+      const p = await tx.product.findUnique({
+        where: { id: productId },
+        include: {
+          images: {
+            orderBy: { position: "asc" },
+            take: 1,
+            select: { tgFileId: true, imageId: true, url: true },
+          },
+        },
+      });
+
+      return p;
+    });
+
+    // attach resolved photo like in GET list
+    const photoUrl = updated ? await firstImageWebUrl(updated.id) : null;
+
+    res.json({
+      product: updated
+        ? {
+            id: updated.id,
+            title: updated.title,
+            description: updated.description,
+            price: Number(updated.price),
+            currency: updated.currency,
+            stock: updated.stock,
+            active: updated.active,
+            categoryId: updated.categoryId,
+            photoUrl,
+          }
+        : null,
+    });
+  } catch (e: any) {
+    if (e?.status === 404) {
+      return res.status(404).json({ error: "product_not_found" });
+    }
+    next(e);
+  }
+});
+
 
 // TENANT PRODUCTS by slug
 // TENANT PRODUCTS by slug
