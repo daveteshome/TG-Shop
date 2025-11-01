@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { api } from "../lib/api/index";
+import { getInitDataRaw } from "../lib/telegram";
 
 type Product = {
   id: string;
@@ -38,6 +39,7 @@ export default function Shop() {
   const [pCategory, setPCategory] = useState<string | null>(null);
   const [pDesc, setPDesc] = useState("");
   const [pStock, setPStock] = useState("0");
+  const [pImageFile, setPImageFile] = useState<File | null>(null); // 👈 real file, not URL
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
 
@@ -87,7 +89,36 @@ export default function Shop() {
 
     setSaving(true);
     setSaveErr(null);
+
     try {
+      // 1) if the user picked an image → upload to backend (R2)
+      let imageId: string | null = null;
+      if (pImageFile) {
+        const fd = new FormData();
+        fd.append("file", pImageFile);
+        const initData = getInitDataRaw();
+        console.log("[UPLOAD] on shop.tsx");
+
+
+        const uploadRes = await fetch("/api/uploads/image", {
+          method: "POST",
+          headers: initData
+      ? {
+          Authorization: `tma ${initData}`,
+        }
+      : undefined,
+          body: fd,
+        });
+        console.log("below if ");
+        if (!uploadRes.ok) {
+          console.log("inside if if ");
+          throw new Error("image_upload_failed");
+        }
+        const uploadJson = await uploadRes.json();
+        imageId = uploadJson.imageId || null;
+      }
+
+      // 2) create product (JSON)
       await api(`/shop/${slug}/products`, {
         method: "POST",
         headers: {
@@ -101,19 +132,21 @@ export default function Shop() {
           categoryId: pCategory,
           stock: Number(pStock) || 0,
           active: true,
+          imageId, // 👈 pass R2 image id
         }),
       });
 
-      // refresh list
+      // 3) refresh list
       await loadProducts(slug);
 
-      // reset
+      // 4) reset
       setPTitle("");
       setPPrice("");
       setPCurrency("ETB");
       setPDesc("");
       setPCategory(null);
       setPStock("0");
+      setPImageFile(null);
       setShowCreate(false);
     } catch (e: any) {
       setSaveErr(e?.message || "Failed to create product");
@@ -222,6 +255,17 @@ export default function Shop() {
             placeholder="Stock (0)"
             style={input}
             inputMode="numeric"
+          />
+
+          {/* 👇 actual file picker */}
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(e) => {
+              const file = e.target.files?.[0] || null;
+              setPImageFile(file);
+            }}
+            style={input}
           />
 
           <button onClick={handleCreateProduct} disabled={saving} style={btn}>

@@ -14,6 +14,11 @@ import { firstImageWebUrl } from "../services/image.resolve";
 
 import { resolveTenant } from '../middlewares/resolveTenant';
 import { telegramAuth } from '../api/telegramAuth';
+import multer from "multer";
+
+import { upsertImageFromBytes  } from "../lib/r2";  // 👈 this exists in your repo
+//const upload = multer({ storage: multer.memoryStorage() });
+
 
 import type { Request } from "express";
 import type { Tenant } from "@prisma/client";
@@ -158,6 +163,36 @@ api.get("/shops/list", async (req: any, res, next) => {
   }
 });
 
+
+const upload = multer({ storage: multer.memoryStorage() });
+// real R2 upload
+api.post("/uploads/image", upload.single("file"), async (req: any, res, next) => {
+  try {
+    const userId = req.userId!;        // from telegramAuth
+    const tenantId = req.tenantId || "global"; // if you want to default; or make it required
+    const file = req.file;
+
+    if (!file) {
+      return res.status(400).json({ error: "file_required" });
+    }
+
+    // 👇 THIS calls your existing r2.ts logic
+    const img = await upsertImageFromBytes(file.buffer, file.mimetype, tenantId);
+
+    // img.id is the value we will store in productImage.imageId
+    res.json({
+      imageId: img.id,
+      width: img.width,
+      height: img.height,
+      mime: img.mime,
+      key: img.key,
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+
 // Create invite (OWNER)
 api.post('/tenants/:tenantId/invites', async (req, res, next) => {
   try {
@@ -267,10 +302,9 @@ api.get('/universal', async (req, res, next) => {
 
 
 // CREATE PRODUCT
-api.post('/shop/:slug/products', resolveTenant, async (req: any, res, next) => {
+api.post("/shop/:slug/products", resolveTenant, async (req: any, res, next) => {
   try {
     const tenantId = req.tenantId!;
-    const userId = req.userId!;
     const {
       title,
       price,
@@ -279,6 +313,7 @@ api.post('/shop/:slug/products', resolveTenant, async (req: any, res, next) => {
       categoryId = null,
       stock = 0,
       active = true,
+      imageId = null,    // 👈 from upload
     } = req.body || {};
 
     if (!title || String(title).trim().length < 2) {
@@ -288,26 +323,40 @@ api.post('/shop/:slug/products', resolveTenant, async (req: any, res, next) => {
       return res.status(400).json({ error: "price_required" });
     }
 
-    const p = await db.product.create({
-      data: {
-        tenantId,
-        title: String(title).trim(),
-        description: description ? String(description) : null,
-        price: Number(price),
-        currency: currency,
-        categoryId: categoryId ? String(categoryId) : null,
-        stock: Number(stock) || 0,
-        active: !!active,
-        // createdBy: userId, // only if you have it
-      },
+    const product = await db.$transaction(async (tx) => {
+      const p = await tx.product.create({
+        data: {
+          tenantId,
+          title: String(title).trim(),
+          description: description ? String(description) : null,
+          price: Number(price),
+          currency: currency,
+          categoryId: categoryId ? String(categoryId) : null,
+          stock: Number(stock) || 0,
+          active: !!active,
+        },
+      });
+
+      // if an image was uploaded → link it
+      if (imageId) {
+        await tx.productImage.create({
+          data: {
+            tenantId,
+            productId: p.id,
+            imageId,          // 👈 this is the sha256 from R2
+            position: 0,
+          },
+        });
+      }
+
+      return p;
     });
 
-    res.json({ product: p });
+    res.json({ product });
   } catch (e) {
     next(e);
   }
 });
-
 
 // TENANT PRODUCTS by slug
 // TENANT PRODUCTS by slug
