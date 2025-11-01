@@ -50,9 +50,19 @@ productsRouter.get('/:id/image', async (req, res, next) => {
 
     // 2) R2 image → redirect to public URL
     if (img.imageId) {
-      const r2Url = publicImageUrl(img.imageId, 'jpg'); // we uploaded as orig.jpg (jpeg)
-      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-      return res.redirect(302, r2Url);
+        const imageRow = await db.image.findUnique({
+          where: { id: img.imageId },
+          select: { mime: true },
+        });
+        const ext = imageRow?.mime?.includes("png")
+          ? "png"
+          : imageRow?.mime?.includes("webp")
+          ? "webp"
+          : "jpg";
+
+        const r2Url = publicImageUrl(img.imageId, ext);
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        return res.redirect(302, r2Url);
     }
 
     // 3) Legacy URL
