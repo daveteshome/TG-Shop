@@ -300,72 +300,59 @@ api.get('/universal', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-
-// CREATE PRODUCT
+// apps/backend/src/api/products.ts (or wherever you have it)
 api.post("/shop/:slug/products", resolveTenant, async (req: any, res, next) => {
   try {
     const tenantId = req.tenantId!;
+    const slug = req.params.slug;
     const {
       title,
       price,
-      currency = "ETB",
-      description = null,
-      categoryId = null,
-      stock = 0,
+      currency,
+      description,
+      categoryId,
+      stock,
       active = true,
-      imageId = null,    // 👈 from upload
-      imageIds,       // array
+      imageIds,
     } = req.body || {};
-
-    if (!title || String(title).trim().length < 2) {
-      return res.status(400).json({ error: "title_required" });
-    }
-    if (price == null || isNaN(Number(price))) {
-      return res.status(400).json({ error: "price_required" });
-    }
 
     const product = await db.$transaction(async (tx) => {
       const p = await tx.product.create({
         data: {
           tenantId,
-          title: String(title).trim(),
-          description: description ? String(description) : null,
-          price: Number(price),
-          currency: currency,
-          categoryId: categoryId ? String(categoryId) : null,
-          stock: Number(stock) || 0,
-          active: !!active,
+          title,
+          price,
+          currency,
+          description,
+          categoryId,
+          stock,
+          active,
         },
       });
 
-      const arr: string[] =
-        Array.isArray(imageIds) && imageIds.length > 0
-          ? imageIds
-          : imageId
-          ? [imageId]
-          : [];
-
-
-      // if an image was uploaded → link it
-      for (let i = 0; i < arr.length; i++) {
-        await tx.productImage.create({
-          data: {
-            tenantId,
-            productId: p.id,
-            imageId: arr[i],
-            position: i,
-          },
-        });
+      // create images in order
+      if (Array.isArray(imageIds) && imageIds.length > 0) {
+        for (let i = 0; i < imageIds.length; i++) {
+          await tx.productImage.create({
+            data: {
+              tenantId,
+              productId: p.id,
+              imageId: imageIds[i],
+              position: i,
+            },
+          });
+        }
       }
 
       return p;
     });
 
-    res.json({ product });
+    res.json({ productId: product.id });
   } catch (e) {
     next(e);
   }
 });
+
 
 // GET single product with all images
 api.get("/shop/:slug/products/:id", resolveTenant, async (req: any, res, next) => {
@@ -375,57 +362,45 @@ api.get("/shop/:slug/products/:id", resolveTenant, async (req: any, res, next) =
 
     const product = await db.product.findFirst({
       where: { id: productId, tenantId },
-      include: {
-        images: {
-          orderBy: { position: "asc" },
-          select: { id: true, imageId: true, tgFileId: true, url: true, position: true },
-        },
-      },
     });
 
     if (!product) {
       return res.status(404).json({ error: "product_not_found" });
     }
 
-    // resolve URLs for every image
-    const imgs = [];
-    for (const img of product.images) {
-      if (img.imageId) {
-        // read mime so we get correct ext (your fixed code)
-        const imgRow = await db.image.findUnique({
-          where: { id: img.imageId },
-          select: { mime: true },
-        });
-        const ext =
-          imgRow?.mime?.includes("png") ? "png" : imgRow?.mime?.includes("webp") ? "webp" : "jpg";
-        imgs.push({
-          ...img,
-          webUrl: publicImageUrl(img.imageId, ext),
-        });
-      } else if (img.tgFileId) {
-        imgs.push({
-          ...img,
-          webUrl: `/api/products/${productId}/image`,
-        });
-      } else if (img.url) {
-        imgs.push({
-          ...img,
-          webUrl: img.url,
-        });
-      }
-    }
+    const images = await db.productImage.findMany({
+      where: { productId, tenantId },
+      orderBy: { position: "asc" },
+      select: { id: true, imageId: true, tgFileId: true, url: true, position: true },
+    });
+
+    // turn imageId into public url (same logic you already have)
+    const imagesWithUrl = await Promise.all(
+      images.map(async (im) => {
+        if (im.imageId) {
+          const imgRow = await db.image.findUnique({
+            where: { id: im.imageId },
+            select: { mime: true },
+          });
+          const mime = imgRow?.mime?.toLowerCase() || "image/jpeg";
+          let ext: "jpg" | "png" | "webp" = "jpg";
+          if (mime.includes("png")) ext = "png";
+          else if (mime.includes("webp")) ext = "webp";
+          return {
+            ...im,
+            webUrl: publicImageUrl(im.imageId!, ext),
+          };
+        }
+        if (im.url) {
+          return { ...im, webUrl: im.url };
+        }
+        return { ...im, webUrl: null };
+      })
+    );
 
     res.json({
-      product: {
-        id: product.id,
-        title: product.title,
-        description: product.description,
-        price: product.price,
-        currency: product.currency,
-        categoryId: product.categoryId,
-        stock: product.stock,
-      },
-      images: imgs,
+      product,
+      images: imagesWithUrl,
     });
   } catch (e) {
     next(e);
@@ -433,13 +408,14 @@ api.get("/shop/:slug/products/:id", resolveTenant, async (req: any, res, next) =
 });
 
 
+
 // UPDATE PRODUCT in a tenant
+
 api.patch("/shop/:slug/products/:id", resolveTenant, async (req: any, res, next) => {
   try {
     const tenantId = req.tenantId!;
     const productId = String(req.params.id);
 
-    // fields that can be updated
     const {
       title,
       price,
@@ -448,111 +424,125 @@ api.patch("/shop/:slug/products/:id", resolveTenant, async (req: any, res, next)
       categoryId,
       stock,
       active,
-      imageId, // 👈 if sent, we update the image link too
+      // new, simple shape 👇
+      imageIds,
+      // old shape 👇
+      imagesReplace,
     } = req.body || {};
 
-    // update product itself
-    const updated = await db.$transaction(async (tx) => {
-      // 1) update the product row
-      const { count } = await tx.product.updateMany({
+    await db.$transaction(async (tx) => {
+      // 1) update product fields (only those sent)
+      await tx.product.update({
         where: { id: productId, tenantId },
         data: {
-          ...(title !== undefined ? { title: String(title).trim() } : {}),
+          ...(title !== undefined ? { title } : {}),
           ...(price !== undefined ? { price: Number(price) } : {}),
-          ...(currency !== undefined ? { currency: currency } : {}),
+          ...(currency !== undefined ? { currency } : {}),
           ...(description !== undefined ? { description } : {}),
+          ...(categoryId !== undefined ? { categoryId } : {}),
           ...(stock !== undefined ? { stock: Number(stock) } : {}),
-          ...(active !== undefined ? { active: !!active } : {}),
-          ...(categoryId !== undefined
-            ? categoryId === null
-              ? { categoryId: null }
-              : { categoryId }
-            : {}),
+          ...(active !== undefined ? { active } : {}),
         },
       });
 
-      if (count === 0) {
-        throw Object.assign(new Error("not_found"), { status: 404 });
-      }
+      //
+      // 2) IMAGES
+      //
 
-      // 2) handle image change, but only if client actually sent imageId
-      if (imageId !== undefined) {
-        // find first image for this product
-        const existing = await tx.productImage.findFirst({
-          where: { productId },
-          orderBy: { position: "asc" },
+      //
+      // 2A) NEW simple path: { imageIds: [...] }
+      //
+      if (Array.isArray(imageIds)) {
+        // remove all current product images
+        await tx.productImage.deleteMany({
+          where: { tenantId, productId },
         });
 
-        if (imageId === null) {
-          // user removed image
-          if (existing) {
-            await tx.productImage.delete({ where: { id: existing.id } });
-          }
-        } else {
-          // user set / changed image
-          if (existing) {
-            await tx.productImage.update({
-              where: { id: existing.id },
-              data: {
-                tenantId,
-                imageId,
-                tgFileId: null,
-                url: null,
-              },
-            });
-          } else {
-            await tx.productImage.create({
-              data: {
-                tenantId,
-                productId,
-                imageId,
-                position: 0,
-              },
-            });
-          }
+        // recreate in this order
+        for (let i = 0; i < imageIds.length; i++) {
+          const imgId = imageIds[i];
+          await tx.productImage.create({
+            data: {
+              tenantId,
+              productId,
+              imageId: imgId ?? null,
+              // if you support url/tgFileId here, add conditionally
+              position: i,
+            },
+          });
         }
+
+        return; // we’re done with images
       }
 
-      // 3) re-read full product with image
-      const p = await tx.product.findUnique({
-        where: { id: productId },
-        include: {
-          images: {
-            orderBy: { position: "asc" },
-            take: 1,
-            select: { tgFileId: true, imageId: true, url: true },
-          },
-        },
-      });
+      //
+      // 2B) OLD path: { imagesReplace: [...] }
+      //
+      if (Array.isArray(imagesReplace)) {
+        // delete all and rebuild — this is safer than trying to diff
+        await tx.productImage.deleteMany({
+          where: { tenantId, productId },
+        });
 
-      return p;
-    });
+        for (let i = 0; i < imagesReplace.length; i++) {
+          const item = imagesReplace[i];
 
-    // attach resolved photo like in GET list
-    const photoUrl = updated ? await firstImageWebUrl(updated.id) : null;
+          // item can be:
+          // 1) { type: "existing", productImageId: "..." }
+          // 2) { type: "existing", imageId: "..." }   👈 THIS is what your frontend sent
+          // 3) { type: "new", imageId: "..." }
 
-    res.json({
-      product: updated
-        ? {
-            id: updated.id,
-            title: updated.title,
-            description: updated.description,
-            price: Number(updated.price),
-            currency: updated.currency,
-            stock: updated.stock,
-            active: updated.active,
-            categoryId: updated.categoryId,
-            photoUrl,
+          let finalImageId: string | null = null;
+          let finalUrl: string | null = null;
+          let finalTgFileId: string | null = null;
+
+          if (item.type === "existing") {
+            // first, if client already gave us imageId, just use it
+            if (item.imageId) {
+              finalImageId = item.imageId;
+            } else if (item.productImageId) {
+              // fallback to old behavior: look up the old row to get its imageId/url
+              const old = await tx.productImage.findUnique({
+                where: { id: item.productImageId },
+                select: {
+                  imageId: true,
+                  tgFileId: true,
+                  url: true,
+                },
+              });
+              if (old) {
+                finalImageId = old.imageId;
+                finalUrl = old.url;
+                finalTgFileId = old.tgFileId;
+              }
+            }
+          } else if (item.type === "new") {
+            // new items must have imageId in request body
+            finalImageId = item.imageId ?? null;
           }
-        : null,
+
+          // create only if we have something to create
+          await tx.productImage.create({
+            data: {
+              tenantId,
+              productId,
+              imageId: finalImageId,
+              url: finalUrl,
+              tgFileId: finalTgFileId,
+              position: i,
+            },
+          });
+        }
+      }
     });
-  } catch (e: any) {
-    if (e?.status === 404) {
-      return res.status(404).json({ error: "product_not_found" });
-    }
-    next(e);
+
+    res.json({ ok: true });
+  } catch (err) {
+    next(err);
   }
 });
+
+
 
 
 // TENANT PRODUCTS by slug
