@@ -23,6 +23,7 @@ import { resolveTenant } from './middlewares/resolveTenant';
 import { tenantApi } from './routes/tenantApi';
 import { telegramAuth } from './api/telegramAuth'; // must set req.user = { tgId }
 import productsRouter from './routes/products';
+import universalRouter from "./routes/universal";
 
 import contactRouter from "./routes/contact";
 import shopRouter from "./routes/shop";
@@ -43,7 +44,7 @@ export function createApp() {
   app.use(cors({
     origin: [
       ENV.WEBAPP_URL,
-      'https://fd067023c4a2.ngrok-free.app', //front
+      'https://bd8e428c095b.ngrok-free.app', //front
       'https://web.telegram.org',
       'https://oauth.telegram.org',
       /\.t\.me$/,
@@ -92,6 +93,8 @@ export function createApp() {
   app.use('/api', shopsRouter);     // new: shops list + create tenant
   app.use('/api', membersRouter);   // new: invites + members mgmt
   app.use("/public", publicTenantRouter);
+  app.use('/api/universal', universalRouter);
+
 
   // ----- Telegram Bot -----
   bot.use(ensureUser());

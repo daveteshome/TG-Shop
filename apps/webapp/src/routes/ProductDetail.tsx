@@ -38,7 +38,7 @@ export default function ProductDetail() {
   const [price, setPrice] = useState("");
   const [currency, setCurrency] = useState("ETB");
   const [desc, setDesc] = useState("");
-  const [stock, setStock] = useState("0");
+  const [stock, setStock] = useState("1");
   const [editImgs, setEditImgs] = useState<
     (
       | { kind: "existing"; imageId: string; url: string | null }
@@ -238,7 +238,6 @@ export default function ProductDetail() {
               )}
             </div>
           ) : (
-            // EDIT MODE in detail page – same style as in list
             <div
               style={{
                 border: "1px solid rgba(0,0,0,.05)",
