@@ -316,21 +316,34 @@ api.post("/shop/:slug/products", resolveTenant, async (req: any, res, next) => {
       imageIds,
     } = req.body || {};
 
+    if (!title || String(title).trim().length === 0) {
+      return res.status(400).json({ error: "title_required" });
+    }
+
+    const priceNum = Number(price);
+    if (price === undefined || Number.isNaN(priceNum) || priceNum < 0) {
+      return res.status(400).json({ error: "invalid_price" });
+    }
+
+    const stockNumRaw = stock === undefined || stock === null || stock === "" ? 0 : Number(stock);
+    if (Number.isNaN(stockNumRaw) || stockNumRaw < 0 || !Number.isInteger(stockNumRaw)) {
+      return res.status(400).json({ error: "invalid_stock" });
+    }
+
     const product = await db.$transaction(async (tx) => {
       const p = await tx.product.create({
         data: {
           tenantId,
-          title,
-          price,
-          currency,
-          description,
-          categoryId,
-          stock,
+          title: title.trim(),
+          price: priceNum,
+          currency: currency || "ETB",
+          description: description ?? null,
+          categoryId: categoryId ?? null,
+          stock: stockNumRaw,
           active,
         },
       });
 
-      // create images in order
       if (Array.isArray(imageIds) && imageIds.length > 0) {
         for (let i = 0; i < imageIds.length; i++) {
           await tx.productImage.create({
@@ -414,8 +427,7 @@ api.get("/shop/:slug/products/:id", resolveTenant, async (req: any, res, next) =
 api.patch("/shop/:slug/products/:id", resolveTenant, async (req: any, res, next) => {
   try {
     const tenantId = req.tenantId!;
-    const productId = String(req.params.id);
-
+    const productId = req.params.id;
     const {
       title,
       price,
@@ -424,121 +436,96 @@ api.patch("/shop/:slug/products/:id", resolveTenant, async (req: any, res, next)
       categoryId,
       stock,
       active,
-      // new, simple shape 👇
       imageIds,
-      // old shape 👇
       imagesReplace,
     } = req.body || {};
 
     await db.$transaction(async (tx) => {
-      // 1) update product fields (only those sent)
+      const data: any = {};
+
+      if (title !== undefined) data.title = String(title).trim();
+      if (currency !== undefined) data.currency = currency;
+      if (description !== undefined) data.description = description;
+      if (categoryId !== undefined) data.categoryId = categoryId;
+      if (active !== undefined) data.active = !!active;
+
+      if (price !== undefined) {
+        const priceNum = Number(price);
+        if (Number.isNaN(priceNum) || priceNum < 0) {
+          throw new Error("invalid_price");
+        }
+        data.price = priceNum;
+      }
+
+      if (stock !== undefined) {
+        const stockNum = Number(stock);
+        if (Number.isNaN(stockNum) || stockNum < 0 || !Number.isInteger(stockNum)) {
+          throw new Error("invalid_stock");
+        }
+        data.stock = stockNum;
+      }
+
       await tx.product.update({
         where: { id: productId, tenantId },
-        data: {
-          ...(title !== undefined ? { title } : {}),
-          ...(price !== undefined ? { price: Number(price) } : {}),
-          ...(currency !== undefined ? { currency } : {}),
-          ...(description !== undefined ? { description } : {}),
-          ...(categoryId !== undefined ? { categoryId } : {}),
-          ...(stock !== undefined ? { stock: Number(stock) } : {}),
-          ...(active !== undefined ? { active } : {}),
-        },
+        data,
       });
 
-      //
-      // 2) IMAGES
-      //
-
-      //
-      // 2A) NEW simple path: { imageIds: [...] }
-      //
+      // images — keep your existing logic
       if (Array.isArray(imageIds)) {
-        // remove all current product images
-        await tx.productImage.deleteMany({
-          where: { tenantId, productId },
-        });
-
-        // recreate in this order
+        await tx.productImage.deleteMany({ where: { tenantId, productId } });
         for (let i = 0; i < imageIds.length; i++) {
-          const imgId = imageIds[i];
           await tx.productImage.create({
             data: {
               tenantId,
               productId,
-              imageId: imgId ?? null,
-              // if you support url/tgFileId here, add conditionally
+              imageId: imageIds[i],
               position: i,
             },
           });
         }
-
-        return; // we’re done with images
+        return;
       }
 
-      //
-      // 2B) OLD path: { imagesReplace: [...] }
-      //
       if (Array.isArray(imagesReplace)) {
-        // delete all and rebuild — this is safer than trying to diff
-        await tx.productImage.deleteMany({
-          where: { tenantId, productId },
-        });
+        await tx.productImage.deleteMany({ where: { tenantId, productId } });
 
         for (let i = 0; i < imagesReplace.length; i++) {
           const item = imagesReplace[i];
-
-          // item can be:
-          // 1) { type: "existing", productImageId: "..." }
-          // 2) { type: "existing", imageId: "..." }   👈 THIS is what your frontend sent
-          // 3) { type: "new", imageId: "..." }
-
-          let finalImageId: string | null = null;
-          let finalUrl: string | null = null;
-          let finalTgFileId: string | null = null;
-
           if (item.type === "existing") {
-            // first, if client already gave us imageId, just use it
-            if (item.imageId) {
-              finalImageId = item.imageId;
-            } else if (item.productImageId) {
-              // fallback to old behavior: look up the old row to get its imageId/url
-              const old = await tx.productImage.findUnique({
-                where: { id: item.productImageId },
-                select: {
-                  imageId: true,
-                  tgFileId: true,
-                  url: true,
-                },
-              });
-              if (old) {
-                finalImageId = old.imageId;
-                finalUrl = old.url;
-                finalTgFileId = old.tgFileId;
-              }
-            }
+            const old = await tx.productImage.findUnique({
+              where: { id: item.productImageId },
+            });
+            if (!old) continue;
+            await tx.productImage.create({
+              data: {
+                tenantId,
+                productId,
+                imageId: old.imageId,
+                url: old.url,
+                tgFileId: old.tgFileId,
+                position: i,
+              },
+            });
           } else if (item.type === "new") {
-            // new items must have imageId in request body
-            finalImageId = item.imageId ?? null;
+            await tx.productImage.create({
+              data: {
+                tenantId,
+                productId,
+                imageId: item.imageId,
+                position: i,
+              },
+            });
           }
-
-          // create only if we have something to create
-          await tx.productImage.create({
-            data: {
-              tenantId,
-              productId,
-              imageId: finalImageId,
-              url: finalUrl,
-              tgFileId: finalTgFileId,
-              position: i,
-            },
-          });
         }
       }
     });
 
     res.json({ ok: true });
-  } catch (err) {
-    next(err);
+  } catch (e: any) {
+    if (e?.message === "invalid_price" || e?.message === "invalid_stock") {
+      return res.status(400).json({ error: e.message });
+    }
+    next(e);
   }
 });
 

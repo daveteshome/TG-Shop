@@ -1,4 +1,4 @@
-// apps/webapp/src/routes/ProductDetail.tsx
+// src/routes/ProductDetail.tsx
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../lib/api/index";
@@ -59,12 +59,13 @@ export default function ProductDetail() {
         setImages(r.images || []);
         setIdx(0);
 
-        // prepare edit data
+        // prep edit
         setTitle(r.product.title || "");
         setPrice(String(r.product.price ?? ""));
         setCurrency(r.product.currency || "ETB");
         setDesc(r.product.description || "");
-        setStock(String(r.product.stock ?? 0));
+        // if 0 → show 1
+        setStock(String(r.product.stock && r.product.stock > 0 ? r.product.stock : 1));
         setEditImgs(
           (r.images || []).map((im) => ({
             kind: "existing" as const,
@@ -94,6 +95,47 @@ export default function ProductDetail() {
     if (!slug || !id) return;
     setSaving(true);
     setSaveErr(null);
+
+    // validate
+    if (!title.trim()) {
+      setSaveErr("Title is required");
+      setSaving(false);
+      return;
+    }
+
+    if (!price.trim()) {
+      setSaveErr("Price is required");
+      setSaving(false);
+      return;
+    }
+    const priceNum = Number(price);
+    if (Number.isNaN(priceNum)) {
+      setSaveErr("Price must be a number");
+      setSaving(false);
+      return;
+    }
+    if (priceNum <= 0) {
+      setSaveErr("Price must be greater than 0");
+      setSaving(false);
+      return;
+    }
+
+    if (!stock.trim()) {
+      setSaveErr("Stock is required");
+      setSaving(false);
+      return;
+    }
+    const stockNum = Number(stock);
+    if (!Number.isInteger(stockNum)) {
+      setSaveErr("Stock must be a whole number");
+      setSaving(false);
+      return;
+    }
+    if (stockNum < 1) {
+      setSaveErr("Stock must be at least 1");
+      setSaving(false);
+      return;
+    }
 
     try {
       const initData = getInitDataRaw();
@@ -131,10 +173,10 @@ export default function ProductDetail() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: title.trim(),
-          price: Number(price),
+          price: priceNum,
           currency,
           description: desc.trim() ? desc.trim() : null,
-          stock: Number(stock) || 0,
+          stock: stockNum,
           imageIds,
         }),
       });
@@ -156,14 +198,55 @@ export default function ProductDetail() {
 
   return (
     <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <button onClick={() => nav(-1)} style={{ border: "1px solid #ddd", borderRadius: 999, width: 28, height: 28 }}>
+      {/* sticky header */}
+      <div
+        style={{
+          position: "sticky",
+          top: 0,
+          zIndex: 20,
+          background: "#fff",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          paddingBottom: 6,
+        }}
+      >
+        <button
+          onClick={() => {
+            const lastShop = localStorage.getItem("tgshop:lastShopPage");
+            if (window.history.length > 1) {
+              // normal case: we actually came from shop -> go back
+              nav(-1);
+            } else if (lastShop) {
+              // restored directly to product -> go to remembered shop
+              nav(lastShop, { replace: true });
+            } else if (slug) {
+              // at least go to this product's shop
+              nav(`/shop/${slug}`, { replace: true });
+            } else {
+              // ultimate fallback
+              nav("/", { replace: true });
+            }
+          }}
+          style={{ border: "1px solid #ddd", borderRadius: 999, width: 28, height: 28, background: "#fff" }}
+        >
           ←
         </button>
-        <h2 style={{ margin: 0, fontSize: 16 }}>{product ? product.title : "Product"}</h2>
-        <div style={{ flex: 1 }} />
+        <h2
+          style={{
+            margin: 0,
+            fontSize: 16,
+            textAlign: "center",
+            flex: 1,
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {product ? product.title : "Product"}
+        </h2>
         <button onClick={() => setEditMode((v) => !v)} style={smallBtn}>
-          {editMode ? "Close edit" : "Edit"}
+          {editMode ? "Close" : "Edit"}
         </button>
       </div>
 
@@ -201,8 +284,17 @@ export default function ProductDetail() {
                 </button>
               </>
             ) : null}
+
+            {/* thumbs centered */}
             {hasImages ? (
-              <div style={thumbRow}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "center",
+                  gap: 6,
+                  marginTop: 10,
+                }}
+              >
                 {images.map((im, i) => (
                   <div
                     key={i}
@@ -224,7 +316,7 @@ export default function ProductDetail() {
             ) : null}
           </div>
 
-          {/* info */}
+          {/* info / edit */}
           {!editMode ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <div style={{ fontWeight: 600, fontSize: 16 }}>
@@ -253,7 +345,14 @@ export default function ProductDetail() {
               <input value={title} onChange={(e) => setTitle(e.target.value)} style={input} placeholder="Title" />
 
               <div style={{ display: "flex", gap: 8 }}>
-                <input value={price} onChange={(e) => setPrice(e.target.value)} style={{ ...input, flex: 1 }} />
+                <input
+                  value={price}
+                  onChange={(e) => setPrice(e.target.value)}
+                  style={{ ...input, flex: 1 }}
+                  placeholder="Price"
+                  type="number"
+                  min={0}
+                />
                 <select value={currency} onChange={(e) => setCurrency(e.target.value)} style={{ ...input, flexBasis: 110 }}>
                   <option value="ETB">ETB</option>
                   <option value="USD">USD</option>
@@ -267,14 +366,23 @@ export default function ProductDetail() {
                 placeholder="Description"
               />
 
-              <input value={stock} onChange={(e) => setStock(e.target.value)} style={input} placeholder="Stock" />
+              <input
+                value={stock}
+                onChange={(e) => setStock(e.target.value)}
+                style={input}
+                placeholder="Stock (min 1)"
+                type="number"
+                min={1}
+                step={1}
+              />
 
               {/* image widget */}
               <div>
                 <label style={{ fontSize: 13, fontWeight: 500, display: "block", marginBottom: 4 }}>
-                  Images
+                  Images (existing + new)
                 </label>
                 <input
+                  id="product-detail-images-input"
                   type="file"
                   accept="image/*"
                   multiple
@@ -292,8 +400,25 @@ export default function ProductDetail() {
                     ]);
                     e.target.value = "";
                   }}
-                  style={input}
+                  style={{ display: "none" }}
                 />
+
+                <button
+                  type="button"
+                  onClick={() => document.getElementById("product-detail-images-input")?.click()}
+                  style={{ ...input, background: "#fafafa", textAlign: "center", cursor: "pointer" }}
+                >
+                  Choose images
+                </button>
+
+                <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4 }}>
+                  {editImgs.length === 0
+                    ? "No images selected"
+                    : editImgs.length === 1
+                    ? "1 image selected"
+                    : `${editImgs.length} images selected`}
+                </div>
+
                 {editImgs.length > 0 ? (
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
                     {editImgs.map((im, index) => {
@@ -313,7 +438,6 @@ export default function ProductDetail() {
                             border: isCover ? "2px solid #000" : "1px solid rgba(0,0,0,.1)",
                           }}
                         >
-                          {/* delete */}
                           <button
                             onClick={() => {
                               setEditImgs((prev) => prev.filter((_, i) => i !== index));
@@ -322,7 +446,6 @@ export default function ProductDetail() {
                           >
                             ×
                           </button>
-                          {/* make cover */}
                           {!isCover ? (
                             <button
                               onClick={() => {
@@ -340,22 +463,11 @@ export default function ProductDetail() {
                           ) : (
                             <div style={thumbCoverTag}>Cover</div>
                           )}
-                          {/* move up/down */}
                           <div style={thumbMoveRow}>
-                            <button
-                              onClick={() => {
-                                setEditImgs((prev) => moveImage(prev, index, -1));
-                              }}
-                              style={thumbMoveBtn}
-                            >
+                            <button onClick={() => setEditImgs((prev) => moveImage(prev, index, -1))} style={thumbMoveBtn}>
                               ↑
                             </button>
-                            <button
-                              onClick={() => {
-                                setEditImgs((prev) => moveImage(prev, index, +1));
-                              }}
-                              style={thumbMoveBtn}
-                            >
+                            <button onClick={() => setEditImgs((prev) => moveImage(prev, index, +1))} style={thumbMoveBtn}>
                               ↓
                             </button>
                           </div>
@@ -434,12 +546,6 @@ const galleryBtnRight: React.CSSProperties = {
   height: 28,
   borderRadius: 999,
   cursor: "pointer",
-};
-
-const thumbRow: React.CSSProperties = {
-  display: "flex",
-  gap: 6,
-  marginTop: 8,
 };
 
 const thumbDeleteBtn: React.CSSProperties = {

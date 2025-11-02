@@ -1,6 +1,6 @@
 // src/App.tsx
 import React, { useState, useMemo, useEffect } from "react";
-import { Routes, Route, useLocation } from "react-router-dom";
+import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
 
 import Home from "./routes/Home";
 import Cart from "./routes/Cart";
@@ -34,12 +34,55 @@ const appStyle: React.CSSProperties = {
 
 export default function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [didRestore, setDidRestore] = useState(false); // 👈 new flag
   const loc = useLocation();
+  const nav = useNavigate();
 
+  // 1) init telegram
   useEffect(() => {
     ready();
     ensureInitDataCached();
   }, []);
+
+  // 2) try to RESTORE (run once)
+  useEffect(() => {
+    const t = setTimeout(() => {
+      try {
+        const saved = localStorage.getItem("tgshop:lastPath");
+        const currentPath = window.location.pathname || "/";
+        const hasStartParam = window.location.search.includes("tgWebAppStartParam=");
+
+        if (
+          saved &&
+          saved !== "/" &&
+          currentPath === "/" &&
+          !hasStartParam &&
+          saved.startsWith("/")
+        ) {
+          nav(saved, { replace: true });
+        }
+      } catch {
+        // ignore
+      } finally {
+        // 👈 VERY IMPORTANT: mark that we already tried to restore
+        setDidRestore(true);
+      }
+    }, 50);
+
+    return () => clearTimeout(t);
+  }, [nav]);
+
+  // 3) SAVE current path — but ONLY after restore attempt
+  useEffect(() => {
+    // if we haven't tried to restore yet AND we're still on "/" -> don't save yet
+    if (!didRestore && loc.pathname === "/") return;
+
+    try {
+      localStorage.setItem("tgshop:lastPath", loc.pathname);
+    } catch {
+      // ignore
+    }
+  }, [loc.pathname, didRestore]);
 
   const title = useMemo(() => {
     if (loc.pathname === "/") return "Home";
@@ -63,7 +106,6 @@ export default function App() {
             <Route path="/" element={<Home />} />
             <Route path="/universal" element={<Universal />} />
             <Route path="/shops" element={<ShopList />} />
-            {/* 👇 just render Shop */}
             <Route path="/shop/:slug" element={<Shop />} />
             <Route path="/shop/:slug/p/:id" element={<ProductDetail />} />
             <Route path="/cart" element={<Cart />} />
