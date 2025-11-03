@@ -34,7 +34,7 @@ const appStyle: React.CSSProperties = {
 
 export default function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [didRestore, setDidRestore] = useState(false); // 👈 new flag
+  const [didRestore, setDidRestore] = useState(false);
   const loc = useLocation();
   const nav = useNavigate();
 
@@ -43,6 +43,10 @@ export default function App() {
     ready();
     ensureInitDataCached();
   }, []);
+
+  // 👇 detect product-detail page
+  // /shop/:slug/p/:id
+  const isProductDetail = /^\/shop\/[^/]+\/p\/[^/]+$/.test(loc.pathname);
 
   // 2) try to RESTORE (run once)
   useEffect(() => {
@@ -64,7 +68,6 @@ export default function App() {
       } catch {
         // ignore
       } finally {
-        // 👈 VERY IMPORTANT: mark that we already tried to restore
         setDidRestore(true);
       }
     }, 50);
@@ -74,9 +77,7 @@ export default function App() {
 
   // 3) SAVE current path — but ONLY after restore attempt
   useEffect(() => {
-    // if we haven't tried to restore yet AND we're still on "/" -> don't save yet
     if (!didRestore && loc.pathname === "/") return;
-
     try {
       localStorage.setItem("tgshop:lastPath", loc.pathname);
     } catch {
@@ -97,16 +98,27 @@ export default function App() {
 
   return (
     <div style={appStyle}>
-      <HeaderBar onOpenMenu={() => setDrawerOpen(true)} title={title} />
-      <DrawerMenu open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+      {/* 👇 hide global header + menu on product detail */}
+      {!isProductDetail && (
+        <>
+          <HeaderBar onOpenMenu={() => setDrawerOpen(true)} title={title} />
+          <DrawerMenu open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+        </>
+      )}
 
-      <main style={{ paddingTop: 8, paddingBottom: 70 }}>
+      <main
+        style={{
+          paddingTop: isProductDetail ? 0 : 8,
+          paddingBottom: 70,
+        }}
+      >
         <ErrorBoundary>
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/universal" element={<Universal />} />
             <Route path="/shops" element={<ShopList />} />
             <Route path="/shop/:slug" element={<Shop />} />
+            {/* 👇 detail page */}
             <Route path="/shop/:slug/p/:id" element={<ProductDetail />} />
             <Route path="/cart" element={<Cart />} />
             <Route path="/categories" element={<Categories />} />

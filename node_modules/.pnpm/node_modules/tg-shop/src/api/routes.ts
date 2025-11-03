@@ -366,6 +366,20 @@ api.post("/shop/:slug/products", resolveTenant, async (req: any, res, next) => {
   }
 });
 
+// ✅ categories endpoint
+// 👇 Return universal categories for every shop
+api.get("/shop/:slug/categories", resolveTenant, async (req: any, res, next) => {
+  try {
+    // Reuse your universal catalog service so it's consistent with /categories
+    const cats = await CatalogService.listCategories();
+    // Ensure the webapp-friendly shape
+    res.json({ items: cats });
+  } catch (err) {
+    next(err);
+  }
+});
+
+
 
 // GET single product with all images
 api.get("/shop/:slug/products/:id", resolveTenant, async (req: any, res, next) => {

@@ -1,4 +1,4 @@
-// src/routes/ProductDetail.tsx
+// apps/webapp/src/routes/ProductDetail.tsx
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../lib/api/index";
@@ -12,6 +12,11 @@ type Product = {
   currency: string;
   stock?: number | null;
   categoryId?: string | null;
+};
+
+type Category = {
+  id: string;
+  title: string;
 };
 
 type ProductImage = {
@@ -39,6 +44,11 @@ export default function ProductDetail() {
   const [currency, setCurrency] = useState("ETB");
   const [desc, setDesc] = useState("");
   const [stock, setStock] = useState("1");
+
+  // ✅ category (restored)
+  const [category, setCategory] = useState<string | null>(null);
+  const [categories, setCategories] = useState<{ id: string; title: string }[]>([]);
+
   const [editImgs, setEditImgs] = useState<
     (
       | { kind: "existing"; imageId: string; url: string | null }
@@ -48,6 +58,38 @@ export default function ProductDetail() {
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
 
+  // ✅ guard unsaved change
+  const [dirty, setDirty] = useState(false);
+  function markDirty() {
+    setDirty(true);
+  }
+  function guardLeave(next: () => void) {
+    if (!dirty) {
+      next();
+      return;
+    }
+    const ok = window.confirm("You have unsaved changes. Discard them?");
+    if (ok) {
+      setDirty(false);
+      next();
+    }
+  }
+
+  // load categories (for selector)
+    useEffect(() => {
+      (async () => {
+        try {
+          const r = await api<Category[]>(`/categories`);
+          setCategories(Array.isArray(r) ? r : []);
+        } catch (e) {
+          console.warn("Failed to load universal categories", e);
+          setCategories([]);
+        }
+      })();
+    }, []);
+
+
+  // load product
   useEffect(() => {
     if (!slug || !id) return;
     (async () => {
@@ -64,8 +106,11 @@ export default function ProductDetail() {
         setPrice(String(r.product.price ?? ""));
         setCurrency(r.product.currency || "ETB");
         setDesc(r.product.description || "");
-        // if 0 → show 1
         setStock(String(r.product.stock && r.product.stock > 0 ? r.product.stock : 1));
+
+        // ✅ restore category
+        setCategory(r.product.categoryId || null);
+
         setEditImgs(
           (r.images || []).map((im) => ({
             kind: "existing" as const,
@@ -73,6 +118,8 @@ export default function ProductDetail() {
             url: im.webUrl ?? im.url ?? null,
           }))
         );
+
+        setDirty(false);
       } catch (e: any) {
         setErr(e?.message || "Failed to load product");
       } finally {
@@ -96,43 +143,25 @@ export default function ProductDetail() {
     setSaving(true);
     setSaveErr(null);
 
-    // validate
+    // ✅ title required
     if (!title.trim()) {
       setSaveErr("Title is required");
       setSaving(false);
       return;
     }
 
-    if (!price.trim()) {
-      setSaveErr("Price is required");
-      setSaving(false);
-      return;
-    }
+    // ✅ price > 0
     const priceNum = Number(price);
-    if (Number.isNaN(priceNum)) {
-      setSaveErr("Price must be a number");
-      setSaving(false);
-      return;
-    }
-    if (priceNum <= 0) {
-      setSaveErr("Price must be greater than 0");
+    if (!price.trim() || Number.isNaN(priceNum) || priceNum <= 0) {
+      setSaveErr("Price must be a number greater than 0");
       setSaving(false);
       return;
     }
 
-    if (!stock.trim()) {
-      setSaveErr("Stock is required");
-      setSaving(false);
-      return;
-    }
+    // ✅ stock > 0, integer
     const stockNum = Number(stock);
-    if (!Number.isInteger(stockNum)) {
-      setSaveErr("Stock must be a whole number");
-      setSaving(false);
-      return;
-    }
-    if (stockNum < 1) {
-      setSaveErr("Stock must be at least 1");
+    if (!stock.trim() || Number.isNaN(stockNum) || stockNum <= 0 || !Number.isInteger(stockNum)) {
+      setSaveErr("Stock must be a whole number greater than 0");
       setSaving(false);
       return;
     }
@@ -140,7 +169,7 @@ export default function ProductDetail() {
     try {
       const initData = getInitDataRaw();
 
-      // upload new ones
+      // upload new
       const uploaded: Record<string, string> = {};
       for (const im of editImgs) {
         if (im.kind === "new") {
@@ -157,7 +186,6 @@ export default function ProductDetail() {
         }
       }
 
-      // final order
       const imageIds: string[] = [];
       for (const im of editImgs) {
         if (im.kind === "existing") {
@@ -168,6 +196,7 @@ export default function ProductDetail() {
         }
       }
 
+      // ✅ include categoryId again
       await api(`/shop/${slug}/products/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -177,14 +206,25 @@ export default function ProductDetail() {
           currency,
           description: desc.trim() ? desc.trim() : null,
           stock: stockNum,
+          categoryId: category,        // ← restored
           imageIds,
         }),
       });
 
-      // reload view
+      // refresh view
       const r = await api<{ product: Product; images: ProductImage[] }>(`/shop/${slug}/products/${id}`);
       setProduct(r.product);
       setImages(r.images || []);
+      setIdx(0);
+      setEditImgs(
+        (r.images || []).map((im) => ({
+          kind: "existing" as const,
+          imageId: im.imageId || "",
+          url: im.webUrl ?? im.url ?? null,
+        }))
+      );
+
+      setDirty(false);
       setEditMode(false);
     } catch (e: any) {
       setSaveErr(e?.message || "Failed to save");
@@ -198,7 +238,7 @@ export default function ProductDetail() {
 
   return (
     <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
-      {/* sticky header */}
+      {/* local sticky header */}
       <div
         style={{
           position: "sticky",
@@ -212,22 +252,20 @@ export default function ProductDetail() {
         }}
       >
         <button
-          onClick={() => {
-            const lastShop = localStorage.getItem("tgshop:lastShopPage");
-            if (window.history.length > 1) {
-              // normal case: we actually came from shop -> go back
-              nav(-1);
-            } else if (lastShop) {
-              // restored directly to product -> go to remembered shop
-              nav(lastShop, { replace: true });
-            } else if (slug) {
-              // at least go to this product's shop
-              nav(`/shop/${slug}`, { replace: true });
-            } else {
-              // ultimate fallback
-              nav("/", { replace: true });
-            }
-          }}
+          onClick={() =>
+            guardLeave(() => {
+              const lastShop = localStorage.getItem("tgshop:lastShopPage");
+              if (window.history.length > 1) {
+                nav(-1);
+              } else if (lastShop) {
+                nav(lastShop, { replace: true });
+              } else if (slug) {
+                nav(`/shop/${slug}`, { replace: true });
+              } else {
+                nav("/", { replace: true });
+              }
+            })
+          }
           style={{ border: "1px solid #ddd", borderRadius: 999, width: 28, height: 28, background: "#fff" }}
         >
           ←
@@ -245,7 +283,7 @@ export default function ProductDetail() {
         >
           {product ? product.title : "Product"}
         </h2>
-        <button onClick={() => setEditMode((v) => !v)} style={smallBtn}>
+        <button onClick={() => guardLeave(() => setEditMode((v) => !v))} style={smallBtn}>
           {editMode ? "Close" : "Edit"}
         </button>
       </div>
@@ -285,16 +323,9 @@ export default function ProductDetail() {
               </>
             ) : null}
 
-            {/* thumbs centered */}
+            {/* centered thumbs */}
             {hasImages ? (
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "center",
-                  gap: 6,
-                  marginTop: 10,
-                }}
-              >
+              <div style={{ display: "flex", justifyContent: "center", gap: 6, marginTop: 10 }}>
                 {images.map((im, i) => (
                   <div
                     key={i}
@@ -316,7 +347,7 @@ export default function ProductDetail() {
             ) : null}
           </div>
 
-          {/* info / edit */}
+          {/* view / edit block */}
           {!editMode ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <div style={{ fontWeight: 600, fontSize: 16 }}>
@@ -342,45 +373,93 @@ export default function ProductDetail() {
             >
               {saveErr ? <div style={{ color: "crimson" }}>{saveErr}</div> : null}
 
-              <input value={title} onChange={(e) => setTitle(e.target.value)} style={input} placeholder="Title" />
+              <input
+                value={title}
+                onChange={(e) => {
+                  setTitle(e.target.value);
+                  markDirty();
+                }}
+                style={input}
+                placeholder="Title"
+                required
+              />
 
               <div style={{ display: "flex", gap: 8 }}>
                 <input
                   value={price}
-                  onChange={(e) => setPrice(e.target.value)}
+                  onChange={(e) => {
+                    setPrice(e.target.value);
+                    markDirty();
+                  }}
                   style={{ ...input, flex: 1 }}
                   placeholder="Price"
                   type="number"
-                  min={0}
+                  min={1}
+                  step={1}
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                 />
-                <select value={currency} onChange={(e) => setCurrency(e.target.value)} style={{ ...input, flexBasis: 110 }}>
+                <select
+                  value={currency}
+                  onChange={(e) => {
+                    setCurrency(e.target.value);
+                    markDirty();
+                  }}
+                  style={{ ...input, flexBasis: 110 }}
+                >
                   <option value="ETB">ETB</option>
                   <option value="USD">USD</option>
                 </select>
               </div>
 
+              {/* ✅ category (restored) */}
+              <select
+                value={category ?? ""}
+                onChange={(e) => {
+                  setCategory(e.target.value || null);
+                  markDirty();
+                }}
+                style={input}
+              >
+                <option value="">No category</option>
+                {categories.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.title}
+                  </option>
+                ))}
+              </select>
+
               <textarea
                 value={desc}
-                onChange={(e) => setDesc(e.target.value)}
+                onChange={(e) => {
+                  setDesc(e.target.value);
+                  markDirty();
+                }}
                 style={{ ...input, minHeight: 60 }}
                 placeholder="Description"
               />
 
               <input
                 value={stock}
-                onChange={(e) => setStock(e.target.value)}
+                onChange={(e) => {
+                  setStock(e.target.value);
+                  markDirty();
+                }}
                 style={input}
-                placeholder="Stock (min 1)"
+                placeholder="Stock (units)"
                 type="number"
                 min={1}
                 step={1}
+                inputMode="numeric"
+                pattern="[0-9]*"
               />
 
-              {/* image widget */}
+              {/* images edit */}
               <div>
                 <label style={{ fontSize: 13, fontWeight: 500, display: "block", marginBottom: 4 }}>
                   Images (existing + new)
                 </label>
+
                 <input
                   id="product-detail-images-input"
                   type="file"
@@ -398,6 +477,7 @@ export default function ProductDetail() {
                         previewUrl: URL.createObjectURL(file),
                       })),
                     ]);
+                    markDirty();
                     e.target.value = "";
                   }}
                   style={{ display: "none" }}
@@ -441,6 +521,7 @@ export default function ProductDetail() {
                           <button
                             onClick={() => {
                               setEditImgs((prev) => prev.filter((_, i) => i !== index));
+                              markDirty();
                             }}
                             style={thumbDeleteBtn}
                           >
@@ -455,6 +536,7 @@ export default function ProductDetail() {
                                   copy.unshift(item);
                                   return copy;
                                 });
+                                markDirty();
                               }}
                               style={thumbCoverBtn}
                             >
@@ -464,10 +546,22 @@ export default function ProductDetail() {
                             <div style={thumbCoverTag}>Cover</div>
                           )}
                           <div style={thumbMoveRow}>
-                            <button onClick={() => setEditImgs((prev) => moveImage(prev, index, -1))} style={thumbMoveBtn}>
+                            <button
+                              onClick={() => {
+                                setEditImgs((prev) => moveImage(prev, index, -1));
+                                markDirty();
+                              }}
+                              style={thumbMoveBtn}
+                            >
                               ↑
                             </button>
-                            <button onClick={() => setEditImgs((prev) => moveImage(prev, index, +1))} style={thumbMoveBtn}>
+                            <button
+                              onClick={() => {
+                                setEditImgs((prev) => moveImage(prev, index, +1));
+                                markDirty();
+                              }}
+                              style={thumbMoveBtn}
+                            >
                               ↓
                             </button>
                           </div>
@@ -482,7 +576,7 @@ export default function ProductDetail() {
                 <button onClick={handleSaveEdit} disabled={saving} style={btn}>
                   {saving ? "Saving…" : "Save changes"}
                 </button>
-                <button onClick={() => setEditMode(false)} style={smallBtn}>
+                <button onClick={() => guardLeave(() => setEditMode(false))} style={smallBtn}>
                   Cancel
                 </button>
               </div>
