@@ -1,64 +1,103 @@
-// apps/webapp/src/components/layout/HeaderBar.tsx
 import React from "react";
-import { useNavigate } from "react-router-dom";
-import { useCartCount } from "../../lib/store";
 
-type Props = { onOpenMenu: () => void; title?: string };
+type HeaderBarProps = {
+  title: string;
+  onOpenMenu?: () => void;
+  /** When provided, replaces the default right side (Cart) */
+  rightOverride?: React.ReactNode;
+  /** Makes the center title clickable */
+  onTitleClick?: () => void;
+  /** Default Cart click (used when rightOverride is NOT provided) */
+  onCartClick?: () => void;
+};
 
-export default function HeaderBar({ onOpenMenu, title = "TG Shop" }: Props) {
-  const navigate = useNavigate();
-  const count = useCartCount();
-  
+export default function HeaderBar({
+  title,
+  onOpenMenu,
+  rightOverride,
+  onTitleClick,
+  onCartClick,
+}: HeaderBarProps) {
   return (
     <header
       style={{
-        position: "sticky", top: 0, zIndex: 50, background: "#fff",
-        borderBottom: "1px solid #eee", height: 56,
-        display: "grid", gridTemplateColumns: "48px 1fr 48px", alignItems: "center", padding: "0 6px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: "8px 12px",
+        borderBottom: "1px solid rgba(0,0,0,.06)",
+        position: "sticky",
+        top: 0,
+        zIndex: 10,
+        background: "var(--tg-theme-bg-color, #fff)",
       }}
     >
+      {/* Left: hamburger */}
       <button
-        aria-label="Open menu"
+        type="button"
+        aria-label="Menu"
         onClick={onOpenMenu}
-        style={{ width: 40, height: 40, borderRadius: 10, border: "1px solid #e5e7eb", display: "grid", placeItems: "center", background: "#fff" }}
+        style={{
+          width: 34,
+          height: 34,
+          borderRadius: 8,
+          border: "1px solid rgba(0,0,0,.08)",
+          background: "#fff",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 18,
+          cursor: "pointer",
+        }}
       >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M4 6h16M4 12h16M4 18h16" stroke="#111" strokeWidth="2" strokeLinecap="round" />
-        </svg>
+        ☰
       </button>
 
-      <div
-        onClick={() => navigate("/")}
-        style={{ textAlign: "center", fontWeight: 700, fontSize: 18, cursor: "pointer", userSelect: "none" }}
-        aria-label="Go home"
-        title="Home"
-      >
-        {title}
-      </div>
+      {/* Center: title (button if clickable) */}
+      {onTitleClick ? (
+        <button
+          onClick={onTitleClick}
+          title={title}
+          aria-label={title}
+          style={{
+            fontWeight: 700,
+            fontSize: 18,
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+          }}
+        >
+          {title}
+        </button>
+      ) : (
+        <div style={{ fontWeight: 700, fontSize: 18 }}>{title}</div>
+      )}
 
-      <button
-        aria-label="Open cart"
-        onClick={() => navigate("/cart")}
-        style={{ width: 40, height: 40, borderRadius: 10, border: "1px solid #e5e7eb", display: "grid", placeItems: "center", position: "relative", background: "#fff" }}
-      >
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M6 6h.01L7 17a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2l1-9H6z"
-                stroke="#111" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-          <circle cx="9" cy="21" r="1.8" fill="#111" />
-          <circle cx="18" cy="21" r="1.8" fill="#111" />
-        </svg>
-        {count > 0 && (
-          <span
+      {/* Right: override or default Cart */}
+      <div style={{ minWidth: 34, display: "flex", justifyContent: "flex-end" }}>
+        {rightOverride ?? (
+          <button
+            type="button"
+            aria-label="Cart"
+            onClick={onCartClick}
+            title="Cart"
             style={{
-              position: "absolute", top: -4, right: -4, minWidth: 18, height: 18, padding: "0 5px",
-              borderRadius: 9, background: "#e11d48", color: "#fff", fontSize: 12, fontWeight: 700,
-              display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1,
+              width: 34,
+              height: 34,
+              borderRadius: 8,
+              border: "1px solid rgba(0,0,0,.08)",
+              background: "#fff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 16,
+              cursor: "pointer",
             }}
           >
-            {count > 99 ? "99+" : count}
-          </span>
+            🛒
+          </button>
         )}
-      </button>
+      </div>
     </header>
   );
 }

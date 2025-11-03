@@ -136,6 +136,22 @@ export default function Shop() {
     })();
   }, []);
 
+  // 👇 listens for Add product button click from the global header
+  useEffect(() => {
+    function onAddProduct() {
+      guardLeave(() => {
+        setShowCreate((v) => !v);
+        setShowEdit(false);
+        setEditingId(null);
+        setSaveErr(null);
+        setCreateImages([]);
+      });
+    }
+
+  window.addEventListener("tgshop:add-product", onAddProduct);
+  return () => window.removeEventListener("tgshop:add-product", onAddProduct);
+}, [formDirty]);
+
 
   // =============== CREATE ===============
   async function handleCreateProduct() {
@@ -320,28 +336,6 @@ export default function Shop() {
 
   return (
     <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 16 }}>
-      {/* header */}
-      <header style={{ display: "flex", gap: 10, alignItems: "center" }}>
-        <div style={{ width: 46, height: 46, borderRadius: "999px", background: "#eee" }} />
-        <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 600, fontSize: 15 }}>{tenant?.name ?? "Shop"}</div>
-          <div style={{ fontSize: 12, opacity: 0.6 }}>Private</div>
-        </div>
-        <button
-          onClick={() =>
-            guardLeave(() => {
-              setShowCreate((v) => !v);
-              setShowEdit(false);
-              setEditingId(null);
-              setSaveErr(null);
-              setCreateImages([]);
-            })
-          }
-          style={primaryBtn}
-        >
-          + Add product
-        </button>
-      </header>
 
       {/* create panel */}
       {showCreate && (
@@ -931,5 +925,30 @@ const thumbMoveBtn: React.CSSProperties = {
   fontSize: 10,
   width: 20,
   height: 16,
+  cursor: "pointer",
+};
+
+const iconBtn: React.CSSProperties = {
+  width: 34,
+  height: 34,
+  borderRadius: 8,
+  border: "1px solid rgba(0,0,0,.08)",
+  background: "#fff",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  fontSize: 16,
+  cursor: "pointer",
+};
+
+const avatarBtn: React.CSSProperties = {
+  width: 34,
+  height: 34,
+  borderRadius: "999px",
+  border: "1px solid rgba(0,0,0,.08)",
+  background: "#eee",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
   cursor: "pointer",
 };

@@ -38,15 +38,17 @@ export default function App() {
   const loc = useLocation();
   const nav = useNavigate();
 
+  // Helpers from path
+  const isProductDetail = /^\/shop\/[^/]+\/p\/[^/]+$/.test(loc.pathname);
+  const isShopPage = /^\/shop\/[^/]+$/.test(loc.pathname);
+  const shopMatch = loc.pathname.match(/^\/shop\/([^/]+)/);
+  const currentSlug = shopMatch?.[1];
+
   // 1) init telegram
   useEffect(() => {
     ready();
     ensureInitDataCached();
   }, []);
-
-  // 👇 detect product-detail page
-  // /shop/:slug/p/:id
-  const isProductDetail = /^\/shop\/[^/]+\/p\/[^/]+$/.test(loc.pathname);
 
   // 2) try to RESTORE (run once)
   useEffect(() => {
@@ -55,14 +57,7 @@ export default function App() {
         const saved = localStorage.getItem("tgshop:lastPath");
         const currentPath = window.location.pathname || "/";
         const hasStartParam = window.location.search.includes("tgWebAppStartParam=");
-
-        if (
-          saved &&
-          saved !== "/" &&
-          currentPath === "/" &&
-          !hasStartParam &&
-          saved.startsWith("/")
-        ) {
+        if (saved && saved !== "/" && currentPath === "/" && !hasStartParam && saved.startsWith("/")) {
           nav(saved, { replace: true });
         }
       } catch {
@@ -71,7 +66,6 @@ export default function App() {
         setDidRestore(true);
       }
     }, 50);
-
     return () => clearTimeout(t);
   }, [nav]);
 
@@ -80,9 +74,7 @@ export default function App() {
     if (!didRestore && loc.pathname === "/") return;
     try {
       localStorage.setItem("tgshop:lastPath", loc.pathname);
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, [loc.pathname, didRestore]);
 
   const title = useMemo(() => {
@@ -96,12 +88,86 @@ export default function App() {
     return "TG Shop";
   }, [loc.pathname]);
 
+  // Make the center title clickable like before
+  // Replace your current onTitleClick with this:
+const onTitleClick = () => {
+  if (title === "Home") return nav("/");
+  if (title === "Shop") return nav("/shops");            // ← go to My Shops
+  if (title === "Universal Shop") return nav("/universal");
+  if (title === "Shops") return nav("/shops");
+  if (title === "My Orders") return nav("/orders");
+  if (title === "Cart") return nav("/");
+  if (title === "Profile") return nav("/profile");
+};
+
+
+  // Default cart click (when rightOverride is not provided)
+  const onCartClick = () => nav("/cart");
+
+  // Right-side override for the Shop page header (replaces Cart)
+  const rightForShop = (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+        onClick={() => window.dispatchEvent(new CustomEvent("tgshop:add-product"))}
+        style={{
+          background: "#f6f6f6",
+          color: "#0c0c0cff",
+          border: "1px solid #000",
+          borderRadius: 10,
+          padding: "6px 10px",
+          fontSize: 12,
+          lineHeight: 1.1,
+          cursor: "pointer",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          height: 40,
+          width: 60,
+          whiteSpace: "normal",
+          textAlign: "center",
+        }}
+      >
+        <span style={{ fontWeight: 600 }}>Add</span>
+        <span style={{ fontSize: 11 }}>Product</span>
+      </button>
+
+      <button
+        aria-label="Shop menu"
+        onClick={() => window.dispatchEvent(new CustomEvent("tgshop:open-shop-menu"))}
+        style={{
+          width: 34,
+          height: 34,
+          borderRadius: "999px",
+          border: "1px solid rgba(0,0,0,.08)",
+          background: "#eee",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          cursor: "pointer",
+          fontSize: 12,
+          fontWeight: 600,
+        }}
+        title="Shop"
+      >
+        {currentSlug ? currentSlug[0].toUpperCase() : "S"}
+      </button>
+    </div>
+  );
+
   return (
     <div style={appStyle}>
-      {/* 👇 hide global header + menu on product detail */}
+      {/* hide global header + menu on product detail */}
       {!isProductDetail && (
         <>
-          <HeaderBar onOpenMenu={() => setDrawerOpen(true)} title={title} />
+          <HeaderBar
+            onOpenMenu={() => setDrawerOpen(true)}
+            title={title}
+            onTitleClick={onTitleClick}
+            onCartClick={onCartClick}
+            // Only on /shop/:slug, replace the Cart with Add+Avatar
+            rightOverride={isShopPage ? rightForShop : undefined}
+          />
           <DrawerMenu open={drawerOpen} onClose={() => setDrawerOpen(false)} />
         </>
       )}
@@ -118,7 +184,7 @@ export default function App() {
             <Route path="/universal" element={<Universal />} />
             <Route path="/shops" element={<ShopList />} />
             <Route path="/shop/:slug" element={<Shop />} />
-            {/* 👇 detail page */}
+            {/* detail page */}
             <Route path="/shop/:slug/p/:id" element={<ProductDetail />} />
             <Route path="/cart" element={<Cart />} />
             <Route path="/categories" element={<Categories />} />
