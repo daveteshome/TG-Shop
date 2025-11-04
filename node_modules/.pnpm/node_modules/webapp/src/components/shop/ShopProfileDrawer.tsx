@@ -1,5 +1,6 @@
+// src/components/shop/ShopProfileDrawer.tsx
 import React from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import RightDrawer from "../common/RightDrawer";
 
 type ShopProfileDrawerProps = {
@@ -27,14 +28,21 @@ const sectionTitle: React.CSSProperties = {
 
 export default function ShopProfileDrawer({ open, onClose, tenant }: ShopProfileDrawerProps) {
   const nav = useNavigate();
-  const { slug } = useParams();
 
+  // ✅ Stable slug: prefer prop, fallback to URL
+  const computedSlug =
+    tenant?.slug ??
+    (window.location.pathname.match(/^\/shop\/([^/]+)/)?.[1] ?? null);
+
+  const initial = (tenant?.name || computedSlug || "S").slice(0, 1).toUpperCase();
+
+  // ✅ Safe navigation: close first, and don't navigate if it's the same path
   const go = (path: string) => {
     onClose();
-    nav(path);
+    if (window.location.pathname !== path) {
+      nav(path);
+    }
   };
-
-  const initial = (tenant?.name || slug || "S").slice(0, 1).toUpperCase();
 
   return (
     <RightDrawer open={open} onClose={onClose} width="66vw" maxWidth={300}>
@@ -42,53 +50,67 @@ export default function ShopProfileDrawer({ open, onClose, tenant }: ShopProfile
       <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, borderBottom: "1px solid rgba(0,0,0,.06)" }}>
         <div
           style={{
-            width: 40, height: 40, borderRadius: "999px",
-            background: "#eee", display: "flex", alignItems: "center", justifyContent: "center",
-            overflow: "hidden", fontWeight: 700,
+            width: 40,
+            height: 40,
+            borderRadius: "999px",
+            backgroundColor: "#eee",               // avoid 'background' shorthand
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            overflow: "hidden",
+            fontWeight: 700,
           }}
         >
-          {tenant?.logoWebUrl  ? <img src={tenant.logoWebUrl } alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : initial}
+          {tenant?.logoWebUrl ? (
+            <img
+              src={tenant.logoWebUrl}
+              alt=""
+              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+            />
+          ) : (
+            initial
+          )}
         </div>
         <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 700 }}>{tenant?.name ?? slug ?? "Shop"}</div>
+          <div style={{ fontWeight: 700 }}>{tenant?.name ?? computedSlug ?? "Shop"}</div>
           <div style={{ fontSize: 12, opacity: .6 }}>
             {tenant?.publishUniversal ? "Published to Universal" : "Private"}
           </div>
         </div>
         <button
-            onClick={() => {
-                const url = `${window.location.origin}/shop/${slug}`;
-                if (navigator.share) {
-                navigator.share({
-                    title: tenant?.name ?? "My Shop",
-                    url,
-                }).catch(() => {});
-                } else {
-                navigator.clipboard?.writeText(url);
-                alert("Shop link copied!");
-                }
-            }}
-            style={{
-                width: 32,
-                height: 32,
-                borderRadius: 8,
-                border: "1px solid rgba(0,0,0,.08)",
-                background: "#fff",
-                cursor: "pointer",
-                fontSize: 16,
-            }}
-            aria-label="Share shop link"
-            >
-            🔗
-            </button>
-
+          onClick={() => {
+            if (!computedSlug) return onClose();
+            const url = `${window.location.origin}/shop/${computedSlug}`;
+            if (navigator.share) {
+              navigator.share({ title: tenant?.name ?? "My Shop", url }).catch(() => {});
+            } else {
+              navigator.clipboard?.writeText(url);
+              alert("Shop link copied!");
+            }
+          }}
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: 8,
+            border: "1px solid rgba(0,0,0,.08)",
+            background: "#fff",
+            cursor: "pointer",
+            fontSize: 16,
+          }}
+          aria-label="Share shop link"
+        >
+          🔗
+        </button>
       </div>
 
       {/* Quick actions */}
       <div style={{ padding: "8px 12px" }}>
         <button
-            onClick={() => go(`/shop/${slug}?view=customer`)}
-            style={{
+          onClick={() => {
+            if (!computedSlug) return onClose();
+            go(`/shop/${computedSlug}?view=customer`);
+          }}
+          style={{
             border: "1px solid rgba(0,0,0,.1)",
             borderRadius: 999,
             padding: "4px 12px",
@@ -97,33 +119,90 @@ export default function ShopProfileDrawer({ open, onClose, tenant }: ShopProfile
             fontSize: 13,
             lineHeight: 1.2,
             width: "100%",
-            }}
+          }}
         >
-            View as customer
+          View as customer
         </button>
-        </div>
-
-
+      </div>
 
       {/* Sections */}
       <div style={{ overflowY: "auto" }}>
         <div style={sectionTitle}>Manage</div>
-        <div style={row} onClick={() => go(`/shop/${slug}/settings`)}>⚙️ Shop settings</div>
-        <div style={row} onClick={() => go(`/shop/${slug}/categories`)}>🗂️ Categories</div>
-        <div style={row} onClick={() => go(`/shop/${slug}/invitations`)}>👥 Invitations & roles</div>
+        <div
+          style={row}
+          onClick={() => {
+            if (!computedSlug) return onClose();
+            go(`/shop/${computedSlug}/settings`);     // ✅ safe nav, no duplicate
+          }}
+        >
+          ⚙️ Shop settings
+        </div>
+        <div
+          style={row}
+          onClick={() => {
+            if (!computedSlug) return onClose();
+            go(`/shop/${computedSlug}/categories`);
+          }}
+        >
+          🗂️ Categories
+        </div>
+        <div
+          style={row}
+          onClick={() => {
+            if (!computedSlug) return onClose();
+            go(`/shop/${computedSlug}/invitations`);
+          }}
+        >
+          👥 Invitations & roles
+        </div>
 
         <div style={sectionTitle}>Catalog & Sales</div>
-        <div style={row} onClick={() => go(`/shop/${slug}`)}>📦 Products</div>
-        <div style={row} onClick={() => go(`/shop/${slug}/orders`)}>🧾 Orders</div>
+        <div
+          style={row}
+          onClick={() => {
+            if (!computedSlug) return onClose();
+            go(`/shop/${computedSlug}`);
+          }}
+        >
+          📦 Products
+        </div>
+        <div
+          style={row}
+          onClick={() => {
+            if (!computedSlug) return onClose();
+            go(`/shop/${computedSlug}/orders`);
+          }}
+        >
+          🧾 Orders
+        </div>
 
         <div style={sectionTitle}>Analytics</div>
-        <div style={row} onClick={() => go(`/shop/${slug}/analytics`)}>📈 Overview</div>
-        <div style={row} onClick={() => go(`/shop/${slug}/analytics/top-products`)}>⭐ Top products</div>
+        <div
+          style={row}
+          onClick={() => {
+            if (!computedSlug) return onClose();
+            go(`/shop/${computedSlug}/analytics`);
+          }}
+        >
+          📈 Overview
+        </div>
+        <div
+          style={row}
+          onClick={() => {
+            if (!computedSlug) return onClose();
+            go(`/shop/${computedSlug}/analytics/top-products`);
+          }}
+        >
+          ⭐ Top products
+        </div>
 
         <div style={sectionTitle}>Publishing</div>
         <div
           style={row}
-          onClick={() => go(`/shop/${slug}/settings`)}
+          onClick={() => {
+            if (!computedSlug) return onClose();
+            go(`/shop/${computedSlug}/settings`); // toggle later in settings
+          }}
           title="Toggle will be implemented later in Settings"
         >
           🌍 Publish to Universal

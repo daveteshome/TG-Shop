@@ -23,6 +23,7 @@ import ShopTopProducts from "./routes/ShopTopProducts";
 import ErrorBoundary from "./components/common/ErrorBoundary";
 import HeaderBar from "./components/layout/HeaderBar";
 import DrawerMenu from "./components/DrawerMenu";
+import ShopProfileDrawer from "./components/shop/ShopProfileDrawer";
 
 import { ensureInitDataCached, ready } from "./lib/telegram";
 
@@ -38,8 +39,25 @@ const appStyle: React.CSSProperties = {
   boxSizing: "border-box",
 };
 
+// Decide where "back" should go from the current path
+function getBackTarget(pathname: string): string | null {
+  if (pathname === "/") return null;                  // Home: no back
+  if (pathname === "/shops") return "/";              // Shops → Home
+
+  const shopMatch = pathname.match(/^\/shop\/([^/]+)(?:\/.*)?$/);
+  if (shopMatch) {
+    const slug = shopMatch[1];
+    const isRoot = pathname === `/shop/${slug}` || pathname === `/shop/${slug}/`;
+    return isRoot ? "/shops" : `/shop/${slug}`;       // Shop root → Shops, subpage → Shop root
+  }
+
+  // Focus for this phase is My Shops & Shop routes; no back elsewhere
+  return null;
+}
+
 export default function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false); // NEW: global profile drawer
   const [didRestore, setDidRestore] = useState(false);
   const loc = useLocation();
   const nav = useNavigate();
@@ -53,8 +71,8 @@ export default function App() {
   const [shopCtx, setShopCtx] = useState<{
     slug: string | null;
     name: string | null;
-    logoUrl: string | null;
-  }>({ slug: null, name: null, logoUrl: null });
+    logoWebUrl: string | null;
+  }>({ slug: null, name: null, logoWebUrl: null });
 
   // Init Telegram
   useEffect(() => {
@@ -62,28 +80,63 @@ export default function App() {
     ensureInitDataCached();
   }, []);
 
-  // Listen for shop context updates
+  // Force-close the shop profile drawer whenever the URL changes
+  useEffect(() => {
+    setProfileOpen(false);
+  }, [loc.pathname]);
+
+
+  // Listen for shop context updates (robust: won't erase logo if payload misses it)
   useEffect(() => {
     function onCtx(e: any) {
       const d = e.detail || {};
-      setShopCtx({
-        slug: d.slug ?? null,
-        name: d.name ?? null,
-        logoUrl: d.logoUrl ?? null,
-      });
+      const incomingLogo =
+        d.logoWebUrl ??
+        d.webUrl ??
+        d.url ??
+        d.logoUrl ??
+        null;
+
+      setShopCtx(prev => ({
+        slug: d.slug ?? prev.slug ?? null,
+        name: d.name ?? prev.name ?? null,
+        // only update if we actually got a new non-empty logo string
+        logoWebUrl:
+          typeof incomingLogo === "string" && incomingLogo.length > 0
+            ? incomingLogo
+            : prev.logoWebUrl ?? null,
+      }));
     }
     window.addEventListener("tgshop:set-shop-context", onCtx);
     return () => window.removeEventListener("tgshop:set-shop-context", onCtx);
   }, []);
 
-  // Also listen for direct logo update events (from settings save)
+  // Also listen for direct logo update events (only apply when a valid URL is provided)
   useEffect(() => {
     function onLogo(e: any) {
-      const url = e.detail?.url ?? null;
-      setShopCtx((prev) => ({ ...prev, logoUrl: url }));
+      const incomingLogo =
+        e.detail?.logoWebUrl ??
+        e.detail?.webUrl ??
+        e.detail?.url ??
+        e.detail?.logoUrl ??
+        null;
+
+      if (typeof incomingLogo === "string" && incomingLogo.length > 0) {
+        setShopCtx(prev => ({ ...prev, logoWebUrl: incomingLogo }));
+      }
+      // if no valid URL in the event, do nothing (don't wipe the current logo)
     }
     window.addEventListener("tgshop:update-logo", onLogo);
     return () => window.removeEventListener("tgshop:update-logo", onLogo);
+  }, []);
+
+  // Global: open the profile drawer when header avatar is clicked
+  useEffect(() => {
+    function onOpenShopMenu() {
+      setProfileOpen(true);
+    }
+    window.addEventListener("tgshop:open-shop-menu", onOpenShopMenu);
+    return () => window.removeEventListener("tgshop:open-shop-menu", onOpenShopMenu);
   }, []);
 
   // Restore last path once
@@ -93,7 +146,13 @@ export default function App() {
         const saved = localStorage.getItem("tgshop:lastPath");
         const currentPath = window.location.pathname || "/";
         const hasStartParam = window.location.search.includes("tgWebAppStartParam=");
-        if (saved && saved !== "/" && currentPath === "/" && !hasStartParam && saved.startsWith("/")) {
+        if (
+          saved &&
+          saved !== "/" &&
+          currentPath === "/" &&
+          !hasStartParam &&
+          saved.startsWith("/")
+        ) {
           nav(saved, { replace: true });
         }
       } catch {
@@ -113,8 +172,8 @@ export default function App() {
     } catch {}
   }, [loc.pathname, didRestore]);
 
-  // Compute title: for any shop route use shop name
-  const title = useMemo(() => {
+  // Compute human title for non-back states (kept for Home/fallbacks)
+  const computedTitle = useMemo(() => {
     if (isShopRoot || isShopChild) return shopCtx.name || "Shop";
     if (loc.pathname === "/") return "Home";
     if (loc.pathname.startsWith("/universal")) return "Universal Shop";
@@ -125,25 +184,10 @@ export default function App() {
     return "TG Shop";
   }, [loc.pathname, isShopRoot, isShopChild, shopCtx.name]);
 
-  // Clicking the title:
-  // on shop pages -> back to that shop root; otherwise use legacy mapping
-  const onTitleClick = () => {
-    if (isShopRoot && shopCtx.slug) {
-      nav(`/shop/${shopCtx.slug}`);
-      return;
-    }
-    if (isShopChild && shopCtx.slug) {
-      nav(`/shop/${shopCtx.slug}`);
-      return;
-    }
-    // Non-shop pages
-    if (title === "Home") return nav("/");
-    if (title === "Universal Shop") return nav("/universal");
-    if (title === "Shops") return nav("/shops");
-    if (title === "My Orders") return nav("/orders");
-    if (title === "Cart") return nav("/cart");
-    if (title === "Profile") return nav("/profile");
-  };
+  // True Back behavior for center area
+  const backTarget = useMemo(() => getBackTarget(loc.pathname), [loc.pathname]);
+  const headerTitle = backTarget ? "←" : computedTitle;
+  const onTitleClick = backTarget ? () => nav(backTarget) : undefined; // clickable only when back exists
 
   // Default Cart click when no override
   const onCartClick = () => nav("/cart");
@@ -158,10 +202,11 @@ export default function App() {
         height: 34,
         borderRadius: "999px",
         border: "1px solid rgba(0,0,0,.08)",
-        background: "#eee",
-        backgroundImage: shopCtx.logoUrl ? `url(${shopCtx.logoUrl})` : "none",
+        backgroundColor: "#eee",
+        backgroundImage: shopCtx.logoWebUrl ? `url(${shopCtx.logoWebUrl})` : "none",
         backgroundSize: "cover",
         backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -171,7 +216,7 @@ export default function App() {
       }}
       title="Shop profile"
     >
-      {!shopCtx.logoUrl && (shopCtx.name ? shopCtx.name.slice(0, 1).toUpperCase() : "D")}
+      {!shopCtx.logoWebUrl && (shopCtx.name ? shopCtx.name.slice(0, 1).toUpperCase() : "D")}
     </button>
   );
 
@@ -203,6 +248,28 @@ export default function App() {
     </div>
   );
 
+  // Profile button specifically for "My Shops" page
+  const rightForShopsPage = (
+    <button
+      aria-label="Profile"
+      onClick={() => nav("/profile")}
+      style={{
+        width: 34,
+        height: 34,
+        borderRadius: "999px",
+        border: "1px solid rgba(0,0,0,.08)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: 16,
+        cursor: "pointer",
+      }}
+      title="Profile"
+    >
+      👤
+    </button>
+  );
+
   return (
     <div style={appStyle}>
       {/* hide global header + menu on product detail */}
@@ -210,12 +277,34 @@ export default function App() {
         <>
           <HeaderBar
             onOpenMenu={() => setDrawerOpen(true)}
-            title={title}
-            onTitleClick={onTitleClick}
+            title={headerTitle}            // ← shows "←" when a back target exists
+            onTitleClick={onTitleClick}     // ← acts as true Back (undefined on Home)
             onCartClick={onCartClick}
-            rightOverride={isShopRoot ? rightForShopRoot : (isShopChild ? rightForShopChild : undefined)}
+            rightOverride={
+              loc.pathname === "/shops"
+                ? rightForShopsPage
+                : (isShopRoot
+                    ? rightForShopRoot
+                    : (isShopChild ? rightForShopChild : undefined))
+            }
           />
-          <DrawerMenu open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+
+          <DrawerMenu
+            open={drawerOpen}
+            onClose={() => setDrawerOpen(false)}
+          />
+
+          {/* NEW: Global Shop Profile Drawer (works on all /shop/* pages) */}
+          <ShopProfileDrawer
+            open={profileOpen}
+            onClose={() => setProfileOpen(false)}
+            tenant={{
+              name: shopCtx.name ?? null,
+              slug: shopCtx.slug ?? (loc.pathname.match(/^\/shop\/([^/]+)/)?.[1] ?? null),
+              logoWebUrl: shopCtx.logoWebUrl ?? null,
+              publishUniversal: false,
+            }}
+          />
         </>
       )}
 

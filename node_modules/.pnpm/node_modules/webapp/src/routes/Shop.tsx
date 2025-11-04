@@ -86,23 +86,29 @@ export default function Shop() {
     }
   }
 
-  async function loadProducts(shopSlug: string) {
+async function loadProducts(shopSlug: string) {
   const res = await api<{ items: Product[]; tenant: { id: string; name: string } }>(
     `/shop/${shopSlug}/products`
   );
   setProducts(res.items);
-  setTenant(res.tenant);
+    setTenant(prev => ({
+    id: res.tenant.id,
+    name: res.tenant.name,
+    // keep existing logo until we fetch the real one
+    logoWebUrl: prev?.logoWebUrl ?? null,
+  }));
+
 
   // 🔔 Tell the header what shop is active (logo unknown here → null)
   window.dispatchEvent(
     new CustomEvent("tgshop:set-shop-context", {
-      detail: { slug: shopSlug, name: res.tenant.name, logoWebUrl: null },
+      detail: { slug: shopSlug, name: res.tenant.name},
     })
   );
 }
 
 
-  async function loadProductForEdit(shopSlug: string, productId: string) {
+async function loadProductForEdit(shopSlug: string, productId: string) {
     const res = await api<{
       product: Product;
       images: { id: string; imageId: string | null; url: string | null; webUrl: string | null }[];
@@ -150,19 +156,45 @@ export default function Shop() {
   }, []);
 
   useEffect(() => {
+    function onOpenShopMenu() { setProfileOpen(true); }
+    window.addEventListener("tgshop:open-shop-menu", onOpenShopMenu);
+    return () => window.removeEventListener("tgshop:open-shop-menu", onOpenShopMenu);
+  }, []);
+
+  useEffect(() => {
     if (!slug) return;
     (async () => {
       try {
         const t = await api<{ id: string; name: string; logoWebUrl?: string | null }>(`/shop/${slug}`);
-        setTenant(prev => ({ ...prev, ...t }));
+        setTenant(prev => ({
+  ...prev,
+  id: t.id,
+  name: t.name,
+  logoWebUrl: (typeof t.logoWebUrl === "string" && t.logoWebUrl.length > 0)
+    ? t.logoWebUrl
+    : (prev?.logoWebUrl ?? null),
+      }));
 
-        // 🔔 Tell the header what shop is active (logo known here)
+      window.dispatchEvent(new CustomEvent("tgshop:set-shop-context", {
+        detail: {
+          slug,
+          name: t.name,
+          ...(t.logoWebUrl ? { logoWebUrl: t.logoWebUrl } : {}), // include only if truthy
+        },
+      }));
 
+
+        // emit context, but don’t force null into the stream
         window.dispatchEvent(
           new CustomEvent("tgshop:set-shop-context", {
-            detail: { slug, name: t.name, logoWebUrl: t.logoWebUrl ?? null },
+            detail: {
+              slug,
+              name: t.name,
+              ...(t.logoWebUrl ? { logoWebUrl: t.logoWebUrl } : {}), // include only if truthy
+            },
           })
         );
+
       } catch {
         /* ignore — we already sent name with null logo */
       }
