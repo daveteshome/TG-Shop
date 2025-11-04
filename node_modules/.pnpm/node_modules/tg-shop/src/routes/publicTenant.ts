@@ -35,7 +35,7 @@ publicTenantRouter.get("/tenant/:slug", async (req, res, next) => {
         location: tenant.location,
         deliveryRules: tenant.deliveryRules,
         status: tenant.status,
-        logoUrl: tenant.logoUrl,
+        logoImageId: tenant.logoImageId,
         bannerUrl: tenant.bannerUrl,
         publicTelegramLink: tenant.publicTelegramLink,
       },

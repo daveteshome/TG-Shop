@@ -23,7 +23,7 @@ export default function HeaderBar({
       style={{
         display: "flex",
         alignItems: "center",
-        justifyContent: "space-between",
+        gap: 10,
         padding: "8px 12px",
         borderBottom: "1px solid rgba(0,0,0,.06)",
         position: "sticky",
@@ -54,24 +54,27 @@ export default function HeaderBar({
       </button>
 
       {/* Center: title (button if clickable) */}
-      {onTitleClick ? (
-        <button
-          onClick={onTitleClick}
-          title={title}
-          aria-label={title}
-          style={{
-            fontWeight: 700,
-            fontSize: 18,
-            background: "transparent",
-            border: "none",
-            cursor: "pointer",
-          }}
-        >
-          {title}
-        </button>
-      ) : (
-        <div style={{ fontWeight: 700, fontSize: 18 }}>{title}</div>
-      )}
+      <div style={{ flex: 1, textAlign: "center" }}>
+        {onTitleClick ? (
+          <button
+            onClick={onTitleClick}
+            title={title}
+            aria-label={title}
+            style={{
+              fontWeight: 700,
+              fontSize: 18,
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              padding: 0,
+            }}
+          >
+            {title}
+          </button>
+        ) : (
+          <div style={{ fontWeight: 700, fontSize: 18 }}>{title}</div>
+        )}
+      </div>
 
       {/* Right: override or default Cart */}
       <div style={{ minWidth: 34, display: "flex", justifyContent: "flex-end" }}>

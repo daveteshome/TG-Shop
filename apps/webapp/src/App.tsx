@@ -13,8 +13,14 @@ import Products from "./routes/Products";
 import Universal from "./routes/Universal";
 import Shop from "./routes/Shop";
 import ShopList from "./routes/ShopList";
-import ErrorBoundary from "./components/common/ErrorBoundary";
+import ShopSettings from "./routes/ShopSettings";
+import ShopCategories from "./routes/ShopCategories";
+import ShopInvitations from "./routes/ShopInvitations";
+import ShopOrders from "./routes/ShopOrders";
+import ShopAnalytics from "./routes/ShopAnalytics";
+import ShopTopProducts from "./routes/ShopTopProducts";
 
+import ErrorBoundary from "./components/common/ErrorBoundary";
 import HeaderBar from "./components/layout/HeaderBar";
 import DrawerMenu from "./components/DrawerMenu";
 
@@ -38,19 +44,49 @@ export default function App() {
   const loc = useLocation();
   const nav = useNavigate();
 
-  // Helpers from path
+  // Route helpers
   const isProductDetail = /^\/shop\/[^/]+\/p\/[^/]+$/.test(loc.pathname);
-  const isShopPage = /^\/shop\/[^/]+$/.test(loc.pathname);
-  const shopMatch = loc.pathname.match(/^\/shop\/([^/]+)/);
-  const currentSlug = shopMatch?.[1];
+  const isShopRoot = /^\/shop\/[^/]+$/.test(loc.pathname);
+  const isShopChild = /^\/shop\/[^/]+\/.+$/.test(loc.pathname);
 
-  // 1) init telegram
+  // Shop header context (filled by Shop/ShopSettings via window event)
+  const [shopCtx, setShopCtx] = useState<{
+    slug: string | null;
+    name: string | null;
+    logoUrl: string | null;
+  }>({ slug: null, name: null, logoUrl: null });
+
+  // Init Telegram
   useEffect(() => {
     ready();
     ensureInitDataCached();
   }, []);
 
-  // 2) try to RESTORE (run once)
+  // Listen for shop context updates
+  useEffect(() => {
+    function onCtx(e: any) {
+      const d = e.detail || {};
+      setShopCtx({
+        slug: d.slug ?? null,
+        name: d.name ?? null,
+        logoUrl: d.logoUrl ?? null,
+      });
+    }
+    window.addEventListener("tgshop:set-shop-context", onCtx);
+    return () => window.removeEventListener("tgshop:set-shop-context", onCtx);
+  }, []);
+
+  // Also listen for direct logo update events (from settings save)
+  useEffect(() => {
+    function onLogo(e: any) {
+      const url = e.detail?.url ?? null;
+      setShopCtx((prev) => ({ ...prev, logoUrl: url }));
+    }
+    window.addEventListener("tgshop:update-logo", onLogo);
+    return () => window.removeEventListener("tgshop:update-logo", onLogo);
+  }, []);
+
+  // Restore last path once
   useEffect(() => {
     const t = setTimeout(() => {
       try {
@@ -69,7 +105,7 @@ export default function App() {
     return () => clearTimeout(t);
   }, [nav]);
 
-  // 3) SAVE current path — but ONLY after restore attempt
+  // Save current path
   useEffect(() => {
     if (!didRestore && loc.pathname === "/") return;
     try {
@@ -77,81 +113,93 @@ export default function App() {
     } catch {}
   }, [loc.pathname, didRestore]);
 
+  // Compute title: for any shop route use shop name
   const title = useMemo(() => {
+    if (isShopRoot || isShopChild) return shopCtx.name || "Shop";
     if (loc.pathname === "/") return "Home";
     if (loc.pathname.startsWith("/universal")) return "Universal Shop";
     if (loc.pathname.startsWith("/shops")) return "Shops";
     if (loc.pathname.startsWith("/orders")) return "My Orders";
     if (loc.pathname.startsWith("/cart")) return "Cart";
     if (loc.pathname.startsWith("/profile")) return "Profile";
-    if (loc.pathname.startsWith("/shop/")) return "Shop";
     return "TG Shop";
-  }, [loc.pathname]);
+  }, [loc.pathname, isShopRoot, isShopChild, shopCtx.name]);
 
-  // Make the center title clickable like before
-  // Replace your current onTitleClick with this:
-const onTitleClick = () => {
-  if (title === "Home") return nav("/");
-  if (title === "Shop") return nav("/shops");            // ← go to My Shops
-  if (title === "Universal Shop") return nav("/universal");
-  if (title === "Shops") return nav("/shops");
-  if (title === "My Orders") return nav("/orders");
-  if (title === "Cart") return nav("/");
-  if (title === "Profile") return nav("/profile");
-};
+  // Clicking the title:
+  // on shop pages -> back to that shop root; otherwise use legacy mapping
+  const onTitleClick = () => {
+    if (isShopRoot && shopCtx.slug) {
+      nav(`/shop/${shopCtx.slug}`);
+      return;
+    }
+    if (isShopChild && shopCtx.slug) {
+      nav(`/shop/${shopCtx.slug}`);
+      return;
+    }
+    // Non-shop pages
+    if (title === "Home") return nav("/");
+    if (title === "Universal Shop") return nav("/universal");
+    if (title === "Shops") return nav("/shops");
+    if (title === "My Orders") return nav("/orders");
+    if (title === "Cart") return nav("/cart");
+    if (title === "Profile") return nav("/profile");
+  };
 
-
-  // Default cart click (when rightOverride is not provided)
+  // Default Cart click when no override
   const onCartClick = () => nav("/cart");
 
-  // Right-side override for the Shop page header (replaces Cart)
-  const rightForShop = (
+  // Reusable avatar button (uses shop logo/name)
+  const avatarBtn = (
+    <button
+      aria-label="Shop profile"
+      onClick={() => window.dispatchEvent(new CustomEvent("tgshop:open-shop-menu"))}
+      style={{
+        width: 34,
+        height: 34,
+        borderRadius: "999px",
+        border: "1px solid rgba(0,0,0,.08)",
+        background: "#eee",
+        backgroundImage: shopCtx.logoUrl ? `url(${shopCtx.logoUrl})` : "none",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: "pointer",
+        fontSize: 12,
+        fontWeight: 600,
+      }}
+      title="Shop profile"
+    >
+      {!shopCtx.logoUrl && (shopCtx.name ? shopCtx.name.slice(0, 1).toUpperCase() : "D")}
+    </button>
+  );
+
+  // Right side overrides
+  const rightForShopRoot = (
     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button
+      <button
         onClick={() => window.dispatchEvent(new CustomEvent("tgshop:add-product"))}
         style={{
-          background: "#f6f6f6",
-          color: "#0c0c0cff",
+          background: "#000",
+          color: "#fff",
           border: "1px solid #000",
-          borderRadius: 10,
+          borderRadius: 12,
           padding: "6px 10px",
           fontSize: 12,
-          lineHeight: 1.1,
+          lineHeight: "14px",
           cursor: "pointer",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          height: 40,
-          width: 60,
-          whiteSpace: "normal",
-          textAlign: "center",
         }}
       >
-        <span style={{ fontWeight: 600 }}>Add</span>
-        <span style={{ fontSize: 11 }}>Product</span>
+        Add<br />Product
       </button>
+      {avatarBtn}
+    </div>
+  );
 
-      <button
-        aria-label="Shop menu"
-        onClick={() => window.dispatchEvent(new CustomEvent("tgshop:open-shop-menu"))}
-        style={{
-          width: 34,
-          height: 34,
-          borderRadius: "999px",
-          border: "1px solid rgba(0,0,0,.08)",
-          background: "#eee",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          cursor: "pointer",
-          fontSize: 12,
-          fontWeight: 600,
-        }}
-        title="Shop"
-      >
-        {currentSlug ? currentSlug[0].toUpperCase() : "S"}
-      </button>
+  const rightForShopChild = (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      {avatarBtn}
     </div>
   );
 
@@ -165,31 +213,35 @@ const onTitleClick = () => {
             title={title}
             onTitleClick={onTitleClick}
             onCartClick={onCartClick}
-            // Only on /shop/:slug, replace the Cart with Add+Avatar
-            rightOverride={isShopPage ? rightForShop : undefined}
+            rightOverride={isShopRoot ? rightForShopRoot : (isShopChild ? rightForShopChild : undefined)}
           />
           <DrawerMenu open={drawerOpen} onClose={() => setDrawerOpen(false)} />
         </>
       )}
 
-      <main
-        style={{
-          paddingTop: isProductDetail ? 0 : 8,
-          paddingBottom: 70,
-        }}
-      >
+      <main style={{ paddingTop: isProductDetail ? 0 : 8, paddingBottom: 70 }}>
         <ErrorBoundary>
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/universal" element={<Universal />} />
             <Route path="/shops" element={<ShopList />} />
             <Route path="/shop/:slug" element={<Shop />} />
-            {/* detail page */}
             <Route path="/shop/:slug/p/:id" element={<ProductDetail />} />
+
+            {/* Shop profile routes */}
+            <Route path="/shop/:slug/settings" element={<ShopSettings />} />
+            <Route path="/shop/:slug/categories" element={<ShopCategories />} />
+            <Route path="/shop/:slug/invitations" element={<ShopInvitations />} />
+            <Route path="/shop/:slug/orders" element={<ShopOrders />} />
+            <Route path="/shop/:slug/analytics" element={<ShopAnalytics />} />
+            <Route path="/shop/:slug/analytics/top-products" element={<ShopTopProducts />} />
+
             <Route path="/cart" element={<Cart />} />
             <Route path="/categories" element={<Categories />} />
             <Route path="/products" element={<Products />} />
             <Route path="/profile" element={<Profile />} />
+            {/* If you still use OrderDetail, add its route here */}
+            {/* <Route path="/orders/:id" element={<OrderDetail />} /> */}
           </Routes>
         </ErrorBoundary>
       </main>

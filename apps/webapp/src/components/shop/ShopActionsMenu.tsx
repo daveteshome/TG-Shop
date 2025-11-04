@@ -4,7 +4,7 @@ import { useNavigate, useParams } from "react-router-dom";
 type TenantLite = {
   slug: string;
   name: string;
-  logoUrl?: string | null;
+  logoWebUrl?: string | null;
   publishUniversal?: boolean;
 };
 
@@ -25,8 +25,8 @@ export default function ShopActionsMenu({ tenant }: { tenant: TenantLite }) {
         className="w-8 h-8 rounded-full overflow-hidden bg-neutral-200 flex items-center justify-center"
         aria-label="Shop menu"
       >
-        {tenant.logoUrl ? (
-          <img src={tenant.logoUrl} alt="" className="w-full h-full object-cover" />
+        {tenant.logoWebUrl ? (
+          <img src={tenant.logoWebUrl} alt="" className="w-full h-full object-cover" />
         ) : (
           <span className="text-xs font-semibold">{tenant.name?.[0] ?? "S"}</span>
         )}

@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { api } from "../lib/api/index";
 import { getInitDataRaw } from "../lib/telegram";
+import ShopProfileDrawer from "../components/shop/ShopProfileDrawer";
 
 type Product = {
   id: string;
@@ -40,7 +41,7 @@ export default function Shop() {
   const loc = useLocation();
   const nav = useNavigate();
 
-  const [tenant, setTenant] = useState<{ id: string; name: string } | null>(null);
+  //const [tenant, setTenant] = useState<{ id: string; name: string } | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
 
@@ -64,6 +65,8 @@ export default function Shop() {
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
   const [formDirty, setFormDirty] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [tenant, setTenant] = useState<{ id: string; name: string; logoWebUrl?: string | null } | null>(null);
 
   const initData = getInitDataRaw();
 
@@ -84,10 +87,20 @@ export default function Shop() {
   }
 
   async function loadProducts(shopSlug: string) {
-    const res = await api<{ items: Product[]; tenant: { id: string; name: string } }>(`/shop/${shopSlug}/products`);
-    setProducts(res.items);
-    setTenant(res.tenant);
-  }
+  const res = await api<{ items: Product[]; tenant: { id: string; name: string } }>(
+    `/shop/${shopSlug}/products`
+  );
+  setProducts(res.items);
+  setTenant(res.tenant);
+
+  // 🔔 Tell the header what shop is active (logo unknown here → null)
+  window.dispatchEvent(
+    new CustomEvent("tgshop:set-shop-context", {
+      detail: { slug: shopSlug, name: res.tenant.name, logoWebUrl: null },
+    })
+  );
+}
+
 
   async function loadProductForEdit(shopSlug: string, productId: string) {
     const res = await api<{
@@ -136,6 +149,27 @@ export default function Shop() {
     })();
   }, []);
 
+  useEffect(() => {
+    if (!slug) return;
+    (async () => {
+      try {
+        const t = await api<{ id: string; name: string; logoWebUrl?: string | null }>(`/shop/${slug}`);
+        setTenant(prev => ({ ...prev, ...t }));
+
+        // 🔔 Tell the header what shop is active (logo known here)
+
+        window.dispatchEvent(
+          new CustomEvent("tgshop:set-shop-context", {
+            detail: { slug, name: t.name, logoWebUrl: t.logoWebUrl ?? null },
+          })
+        );
+      } catch {
+        /* ignore — we already sent name with null logo */
+      }
+    })();
+  }, [slug]);
+
+  // 👇 listens for Add product button click from the global header
   // 👇 listens for Add product button click from the global header
   useEffect(() => {
     function onAddProduct() {
@@ -148,9 +182,20 @@ export default function Shop() {
       });
     }
 
-  window.addEventListener("tgshop:add-product", onAddProduct);
-  return () => window.removeEventListener("tgshop:add-product", onAddProduct);
-}, [formDirty]);
+    window.addEventListener("tgshop:add-product", onAddProduct);
+    return () => window.removeEventListener("tgshop:add-product", onAddProduct);
+    // formDirty is ok here if you want guardLeave to reflect current state
+  }, [formDirty]);
+
+  // 👇 listens for opening the Shop Profile drawer from the header avatar
+  useEffect(() => {
+    function onOpenShopMenu() {
+      setProfileOpen(true);
+    }
+    window.addEventListener("tgshop:open-shop-menu", onOpenShopMenu);
+    return () => window.removeEventListener("tgshop:open-shop-menu", onOpenShopMenu);
+  }, []);
+
 
 
   // =============== CREATE ===============
@@ -183,7 +228,7 @@ export default function Shop() {
       for (const img of createImages) {
         const fd = new FormData();
         fd.append("file", img.file);
-        const uploadRes = await fetch("/api/uploads/image", {
+        const uploadRes = await fetch(`/api/shop/${slug}/uploads/image`, {
           method: "POST",
           headers: initData ? { Authorization: `tma ${initData}` } : undefined,
           body: fd,
@@ -820,6 +865,18 @@ export default function Shop() {
           ))}
         </div>
       )}
+      {/* Shop Profile Drawer (opens from right) */}
+      <ShopProfileDrawer
+        open={profileOpen}
+        onClose={() => setProfileOpen(false)}
+        tenant={{
+          name: tenant?.name ?? null,
+          slug,
+          logoWebUrl: tenant?.logoWebUrl ?? null,
+          publishUniversal: false,
+        }}
+      />
+
     </div>
   );
 }
