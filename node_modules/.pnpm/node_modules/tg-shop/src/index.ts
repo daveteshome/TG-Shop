@@ -1,10 +1,30 @@
 // apps/backend/src/index.ts
 import 'dotenv/config';
 import { createApp } from './app';
+import { db } from "../src/lib/db";
 
+import { seedCategories } from "../../backend/prisma/seed";
+
+async function maybeSeedCategories() {
+  const env = process.env.NODE_ENV || "development"; // treat undefined as dev
+  console.log(`[seed] NODE_ENV=${env}`);
+  const count = await db.category.count();
+  console.log(`[seed] Category.count=${count}`);
+
+  // Seed if empty or explicitly asked to reset
+  if (count === 0 || String(process.env.SEED_STRATEGY).toLowerCase() === "reset") {
+    console.log("[seed] Seeding categories… strategy=", process.env.SEED_STRATEGY || "reconcile");
+    await seedCategories();
+    const after = await db.category.count();
+    console.log(`[seed] Done. Category.count=${after}`);
+  } else {
+    console.log("[seed] Skipped (table not empty and no reset requested).");
+  }
+}
 
 (async () => {
   try {
+    await maybeSeedCategories();
     const { start } = createApp();
 
     // Start the HTTP server + webhook (handled inside start()).

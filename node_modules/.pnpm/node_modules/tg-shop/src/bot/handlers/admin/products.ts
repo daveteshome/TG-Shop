@@ -44,8 +44,8 @@ function num(v: any) {
 async function getCategoryTitleById(id?: string | null): Promise<string | null> {
   if (!id) return null;
   try {
-    const c = await db.category.findUnique({ where: { id }, select: { title: true } });
-    return c?.title ?? null;
+    const c = await db.category.findUnique({ where: { id }, select: { name: true } });
+    return c?.name ?? null;
   } catch {
     return null;
   }

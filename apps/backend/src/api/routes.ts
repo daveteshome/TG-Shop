@@ -99,11 +99,6 @@ api.get('/_whoami', async (_req, res) => {
   }
 });
 
-api.get("/_debug/tenant-cats", async (_req, res) => {
-  const tenantId = await (await import("../services/tenant.util")).getTenantId();
-  const count = await db.category.count({ where: { tenantId } });
-  res.json({ tenantId, count });
-});
 
 //api.post('/auth/telegram', authTelegramHandler);
 // -------- AUTH GUARD --------
@@ -874,7 +869,7 @@ api.patch("/shop/:slug", resolveTenant, async (req: Request, res: ExResponse, ne
 // ---------- Catalog ----------
 api.get("/categories", async (_req, res, next) => {
   try {
-    const cats = await CatalogService.listCategories();
+    const cats = await CatalogService.listAllCategoriesForCascader();
     // cats already in shape: [{ id, title }, ...] and prefixed with "All"
     res.json(cats);
   } catch (e) {

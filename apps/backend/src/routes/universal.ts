@@ -71,7 +71,7 @@ router.get("/products", async (req, res) => {
         category: {
           select: {
             id: true,
-            title: true,
+            name: true,
           },
         },
       },
@@ -125,7 +125,7 @@ router.get("/products/:id", async (req, res) => {
       category: {
         select: {
           id: true,
-          title: true,
+          name: true,
         },
       },
     },

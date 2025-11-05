@@ -1,8 +1,9 @@
-// apps/webapp/src/routes/ProductDetail.tsx
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../lib/api/index";
 import { getInitDataRaw } from "../lib/telegram";
+import CategoryCascader from "../components/CategoryCascader";
+import { useTranslation } from "react-i18next";
 
 type Product = {
   id: string;
@@ -12,11 +13,6 @@ type Product = {
   currency: string;
   stock?: number | null;
   categoryId?: string | null;
-};
-
-type Category = {
-  id: string;
-  title: string;
 };
 
 type ProductImage = {
@@ -30,6 +26,7 @@ type ProductImage = {
 export default function ProductDetail() {
   const { slug, id } = useParams<{ slug: string; id: string }>();
   const nav = useNavigate();
+  const { t } = useTranslation();
 
   const [loading, setLoading] = useState(true);
   const [product, setProduct] = useState<Product | null>(null);
@@ -45,9 +42,8 @@ export default function ProductDetail() {
   const [desc, setDesc] = useState("");
   const [stock, setStock] = useState("1");
 
-  // ✅ category (restored)
+  // category
   const [category, setCategory] = useState<string | null>(null);
-  const [categories, setCategories] = useState<{ id: string; title: string }[]>([]);
 
   const [editImgs, setEditImgs] = useState<
     (
@@ -58,36 +54,13 @@ export default function ProductDetail() {
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
 
-  // ✅ guard unsaved change
   const [dirty, setDirty] = useState(false);
-  function markDirty() {
-    setDirty(true);
-  }
+  function markDirty() { setDirty(true); }
   function guardLeave(next: () => void) {
-    if (!dirty) {
-      next();
-      return;
-    }
-    const ok = window.confirm("You have unsaved changes. Discard them?");
-    if (ok) {
-      setDirty(false);
-      next();
-    }
+    if (!dirty) { next(); return; }
+    const ok = window.confirm(t("confirm_discard_changes"));
+    if (ok) { setDirty(false); next(); }
   }
-
-  // load categories (for selector)
-    useEffect(() => {
-      (async () => {
-        try {
-          const r = await api<Category[]>(`/categories`);
-          setCategories(Array.isArray(r) ? r : []);
-        } catch (e) {
-          console.warn("Failed to load universal categories", e);
-          setCategories([]);
-        }
-      })();
-    }, []);
-
 
   // load product
   useEffect(() => {
@@ -107,8 +80,6 @@ export default function ProductDetail() {
         setCurrency(r.product.currency || "ETB");
         setDesc(r.product.description || "");
         setStock(String(r.product.stock && r.product.stock > 0 ? r.product.stock : 1));
-
-        // ✅ restore category
         setCategory(r.product.categoryId || null);
 
         setEditImgs(
@@ -121,12 +92,12 @@ export default function ProductDetail() {
 
         setDirty(false);
       } catch (e: any) {
-        setErr(e?.message || "Failed to load product");
+        setErr(e?.message || t("err_load_product_failed"));
       } finally {
         setLoading(false);
       }
     })();
-  }, [slug, id]);
+  }, [slug, id, t]);
 
   function moveImage<T>(list: T[], index: number, dir: -1 | 1): T[] {
     const newIndex = index + dir;
@@ -143,25 +114,22 @@ export default function ProductDetail() {
     setSaving(true);
     setSaveErr(null);
 
-    // ✅ title required
     if (!title.trim()) {
-      setSaveErr("Title is required");
+      setSaveErr(t("err_title_required"));
       setSaving(false);
       return;
     }
 
-    // ✅ price > 0
     const priceNum = Number(price);
     if (!price.trim() || Number.isNaN(priceNum) || priceNum <= 0) {
-      setSaveErr("Price must be a number greater than 0");
+      setSaveErr(t("err_price_gt_zero"));
       setSaving(false);
       return;
     }
 
-    // ✅ stock > 0, integer
     const stockNum = Number(stock);
     if (!stock.trim() || Number.isNaN(stockNum) || stockNum <= 0 || !Number.isInteger(stockNum)) {
-      setSaveErr("Stock must be a whole number greater than 0");
+      setSaveErr(t("err_stock_integer_gt_zero"));
       setSaving(false);
       return;
     }
@@ -196,7 +164,6 @@ export default function ProductDetail() {
         }
       }
 
-      // ✅ include categoryId again
       await api(`/shop/${slug}/products/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -206,7 +173,7 @@ export default function ProductDetail() {
           currency,
           description: desc.trim() ? desc.trim() : null,
           stock: stockNum,
-          categoryId: category,        // ← restored
+          categoryId: category,
           imageIds,
         }),
       });
@@ -227,7 +194,7 @@ export default function ProductDetail() {
       setDirty(false);
       setEditMode(false);
     } catch (e: any) {
-      setSaveErr(e?.message || "Failed to save");
+      setSaveErr(e?.message || t("err_save_failed"));
     } finally {
       setSaving(false);
     }
@@ -267,6 +234,7 @@ export default function ProductDetail() {
             })
           }
           style={{ border: "1px solid #ddd", borderRadius: 999, width: 28, height: 28, background: "#fff" }}
+          aria-label={t("aria_back")}
         >
           ←
         </button>
@@ -281,19 +249,19 @@ export default function ProductDetail() {
             textOverflow: "ellipsis",
           }}
         >
-          {product ? product.title : "Product"}
+          {product ? product.title : t("title_product")}
         </h2>
         <button onClick={() => guardLeave(() => setEditMode((v) => !v))} style={smallBtn}>
-          {editMode ? "Close" : "Edit"}
+          {editMode ? t("btn_close") : t("btn_edit")}
         </button>
       </div>
 
       {loading ? (
-        <div>Loading…</div>
+        <div>{t("msg_loading")}</div>
       ) : err ? (
         <div style={{ color: "crimson" }}>{err}</div>
       ) : !product ? (
-        <div>Not found</div>
+        <div>{t("msg_not_found")}</div>
       ) : (
         <>
           {/* gallery */}
@@ -314,10 +282,15 @@ export default function ProductDetail() {
                 <button
                   style={galleryBtnLeft}
                   onClick={() => setIdx((old) => (old - 1 + images.length) % images.length)}
+                  aria-label={t("aria_prev_image")}
                 >
                   ‹
                 </button>
-                <button style={galleryBtnRight} onClick={() => setIdx((old) => (old + 1) % images.length)}>
+                <button
+                  style={galleryBtnRight}
+                  onClick={() => setIdx((old) => (old + 1) % images.length)}
+                  aria-label={t("aria_next_image")}
+                >
                   ›
                 </button>
               </>
@@ -341,6 +314,7 @@ export default function ProductDetail() {
                       border: i === idx ? "2px solid #000" : "1px solid rgba(0,0,0,.1)",
                       cursor: "pointer",
                     }}
+                    aria-label={t("aria_thumb_image", { index: i + 1 })}
                   />
                 ))}
               </div>
@@ -353,11 +327,13 @@ export default function ProductDetail() {
               <div style={{ fontWeight: 600, fontSize: 16 }}>
                 {product.price} {product.currency}
               </div>
-              <div style={{ fontSize: 13, opacity: 0.6 }}>Stock: {product.stock ?? 0}</div>
+              <div style={{ fontSize: 13, opacity: 0.6 }}>
+                {t("label_stock_short")}: {product.stock ?? 0}
+              </div>
               {product.description ? (
                 <div style={{ fontSize: 13, lineHeight: 1.5 }}>{product.description}</div>
               ) : (
-                <div style={{ fontSize: 12, opacity: 0.5 }}>No description</div>
+                <div style={{ fontSize: 12, opacity: 0.5 }}>{t("msg_no_description")}</div>
               )}
             </div>
           ) : (
@@ -380,7 +356,7 @@ export default function ProductDetail() {
                   markDirty();
                 }}
                 style={input}
-                placeholder="Title"
+                placeholder={t("ph_title")}
                 required
               />
 
@@ -392,7 +368,7 @@ export default function ProductDetail() {
                     markDirty();
                   }}
                   style={{ ...input, flex: 1 }}
-                  placeholder="Price"
+                  placeholder={t("ph_price")}
                   type="number"
                   min={1}
                   step={1}
@@ -412,22 +388,8 @@ export default function ProductDetail() {
                 </select>
               </div>
 
-              {/* ✅ category (restored) */}
-              <select
-                value={category ?? ""}
-                onChange={(e) => {
-                  setCategory(e.target.value || null);
-                  markDirty();
-                }}
-                style={input}
-              >
-                <option value="">No category</option>
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.title}
-                  </option>
-                ))}
-              </select>
+              {/* Category (icons hidden in this context) */}
+              <CategoryCascader value={category} onChange={(id) => { setCategory(id); markDirty(); }} />
 
               <textarea
                 value={desc}
@@ -436,7 +398,7 @@ export default function ProductDetail() {
                   markDirty();
                 }}
                 style={{ ...input, minHeight: 60 }}
-                placeholder="Description"
+                placeholder={t("ph_description")}
               />
 
               <input
@@ -446,7 +408,7 @@ export default function ProductDetail() {
                   markDirty();
                 }}
                 style={input}
-                placeholder="Stock (units)"
+                placeholder={t("ph_stock_units")}
                 type="number"
                 min={1}
                 step={1}
@@ -457,7 +419,7 @@ export default function ProductDetail() {
               {/* images edit */}
               <div>
                 <label style={{ fontSize: 13, fontWeight: 500, display: "block", marginBottom: 4 }}>
-                  Images (existing + new)
+                  {t("label_images_existing_new")}
                 </label>
 
                 <input
@@ -488,15 +450,15 @@ export default function ProductDetail() {
                   onClick={() => document.getElementById("product-detail-images-input")?.click()}
                   style={{ ...input, background: "#fafafa", textAlign: "center", cursor: "pointer" }}
                 >
-                  Choose images
+                  {t("btn_choose_images")}
                 </button>
 
                 <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4 }}>
                   {editImgs.length === 0
-                    ? "No images selected"
+                    ? t("msg_no_images_selected")
                     : editImgs.length === 1
-                    ? "1 image selected"
-                    : `${editImgs.length} images selected`}
+                    ? t("msg_one_image_selected")
+                    : t("msg_many_images_selected", { count: editImgs.length })}
                 </div>
 
                 {editImgs.length > 0 ? (
@@ -524,6 +486,7 @@ export default function ProductDetail() {
                               markDirty();
                             }}
                             style={thumbDeleteBtn}
+                            aria-label={t("aria_remove_image")}
                           >
                             ×
                           </button>
@@ -543,7 +506,7 @@ export default function ProductDetail() {
                               ★
                             </button>
                           ) : (
-                            <div style={thumbCoverTag}>Cover</div>
+                            <div style={thumbCoverTag}>{t("tag_cover")}</div>
                           )}
                           <div style={thumbMoveRow}>
                             <button
@@ -552,6 +515,7 @@ export default function ProductDetail() {
                                 markDirty();
                               }}
                               style={thumbMoveBtn}
+                              aria-label={t("aria_move_image_up")}
                             >
                               ↑
                             </button>
@@ -561,6 +525,7 @@ export default function ProductDetail() {
                                 markDirty();
                               }}
                               style={thumbMoveBtn}
+                              aria-label={t("aria_move_image_down")}
                             >
                               ↓
                             </button>
@@ -574,10 +539,10 @@ export default function ProductDetail() {
 
               <div style={{ display: "flex", gap: 8, marginTop: 28 }}>
                 <button onClick={handleSaveEdit} disabled={saving} style={btn}>
-                  {saving ? "Saving…" : "Save changes"}
+                  {saving ? t("btn_saving") : t("btn_save_changes")}
                 </button>
                 <button onClick={() => guardLeave(() => setEditMode(false))} style={smallBtn}>
-                  Cancel
+                  {t("btn_cancel")}
                 </button>
               </div>
             </div>

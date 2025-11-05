@@ -1,11 +1,11 @@
 // apps/backend/src/services/catalog.service.ts
-import { db } from '../lib/db';
-import { getTenantId } from './tenant.util';
+import { db } from "../lib/db";
+import { getTenantId } from "./tenant.util";
 
 // If you prefer, move to config/env
 const CDN = process.env.CDN_IMAGE_BASE!; // e.g. https://...workers.dev/img
 
-/** ===== Helpers ===== */
+/** ===== Types ===== */
 
 type ProductDTO = {
   id: string;
@@ -20,6 +20,8 @@ type ProductDTO = {
   tenant?: { id: string; slug: string; name: string; publicPhone: string | null };
 };
 
+/** ===== Image helpers ===== */
+
 function photoFromImage(image: { bucketKeyBase: string } | null, w = 512) {
   return image ? `${CDN}/${image.bucketKeyBase}/orig?w=${w}&fmt=auto` : null;
 }
@@ -27,9 +29,11 @@ function photoFromImage(image: { bucketKeyBase: string } | null, w = 512) {
 function resolveImageForWeb(productId: string, ref?: string | null, version?: string) {
   if (!ref) return null;
   if (/^https?:\/\//i.test(ref)) return ref;
-  if (/^tg:file_id:/i.test(ref)) return `/api/products/${productId}/image${version ? `?v=${version}` : ''}`;
+  if (/^tg:file_id:/i.test(ref)) return `/api/products/${productId}/image${version ? `?v=${version}` : ""}`;
   return null;
 }
+
+/** ===== DTO mapping ===== */
 
 function toProductDTO(p: any): ProductDTO {
   // Prefer R2/Cloudflare (Image) → fallback to legacy URL → null
@@ -47,7 +51,7 @@ function toProductDTO(p: any): ProductDTO {
     price: Number(p.price),
     currency: p.currency,
     stock: p.stock,
-    active: p.active,
+    active: p.active, // keeping your existing `active` field usage
     photoUrl: pf,
     categoryId: p.categoryId ?? null,
   };
@@ -66,12 +70,20 @@ function toProductDTO(p: any): ProductDTO {
 
 /** ===== Private helpers ===== */
 
+// Global categories (no tenant filter). Include `name` and map to UI shape later.
 async function listCategoriesRaw() {
-  const tenantId = await getTenantId();
   return db.category.findMany({
-    where: { tenantId, active: true },
-    orderBy: [{ position: 'asc' }, { title: 'asc' }],
-    select: { id: true, title: true, slug: true, position: true, active: true },
+    where: { isActive: true },
+    orderBy: [{ level: "asc" }, { position: "asc" }, { name: "asc" }],
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      parentId: true,
+      level: true,
+      position: true,
+      isActive: true,
+    },
   });
 }
 
@@ -81,34 +93,61 @@ export const CatalogService = {
   /** Storefront: categories with virtual "All" first (local shop) */
   async listCategories() {
     const cats = await listCategoriesRaw();
-    return [{ id: 'all', title: 'All' }, ...cats.map((c) => ({ id: c.id, title: c.title }))];
+    // keep backward compatibility: expose `title` for consumers that expect it
+    return [{ id: "all", title: "All" }, ...cats.map((c) => ({ id: c.id, title: c.name }))];
+  },
+
+  async listAllCategoriesForCascader() {
+    const rows = await listCategoriesRaw();
+    // normalize keys expected by the webapp
+    return rows.map(r => ({
+      id: r.id,
+      name: r.name ?? "",
+      slug: r.slug,
+      parentId: r.parentId,   // <-- critical for drilldown
+      level: r.level ?? 0,
+    }));
   },
 
   /** Admin: list active categories without "All" */
   async listActiveCategories() {
-    const cats = await listCategoriesRaw();
-    return cats.map((c) => ({ id: c.id, title: c.title }));
+    const rows = await listCategoriesRaw();
+    return rows.map(c => ({ id: c.id, title: c.name ?? "" }));
   },
 
-  /** Admin: create/find a category by title (tenant-safe) */
+  /**
+   * Admin/dev: create/find a category by **name** (GLOBAL).
+   * (Kept the function name for compatibility; behavior is now global.)
+   */
   async upsertCategoryByTitle(title: string) {
-    const tenantId = await getTenantId();
     const clean = title.trim();
-    const slug = clean.toLowerCase().replace(/\s+/g, '-').slice(0, 64);
-    const existing = await db.category.findFirst({ where: { tenantId, slug } });
-    if (existing) return { id: existing.id, title: existing.title };
+    const slug = clean
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 64) || "category";
+
+    // global unique by slug now
+    const existing = await db.category.findUnique({ where: { slug } });
+    if (existing) {
+      return { id: existing.id, title: existing.name };
+    }
+
     const created = await db.category.create({
-      data: { tenantId, title: clean, slug },
-      select: { id: true, title: true },
+      data: { slug, name: clean, isActive: true, level: 0, position: 0 },
+      select: { id: true, name: true },
     });
-    return created;
+
+    return { id: created.id, title: created.name };
   },
 
   /** Storefront: paged products (optional category filter) for local/private shop */
   async listProductsByCategoryPaged(categoryId: string, page: number, perPage: number) {
     const tenantId = await getTenantId();
     const where: any = { tenantId, active: true };
-    if (categoryId && categoryId !== 'all') where.categoryId = categoryId;
+    if (categoryId && categoryId !== "all") where.categoryId = categoryId;
 
     const safePage = Math.max(1, Number(page || 1));
     const safePer = Math.max(1, Number(perPage || 12));
@@ -116,11 +155,11 @@ export const CatalogService = {
     const total = await db.product.count({ where });
     const items = await db.product.findMany({
       where,
-      orderBy: [{ title: 'asc' }],
+      orderBy: [{ title: "asc" }],
       skip: (safePage - 1) * safePer,
       take: safePer,
       include: {
-        images: { orderBy: { position: 'asc' }, take: 1, include: { image: true } },
+        images: { orderBy: { position: "asc" }, take: 1, include: { image: true } },
       },
     });
 
@@ -137,18 +176,18 @@ export const CatalogService = {
   async listProductsByCategory(categoryId: string) {
     const tenantId = await getTenantId();
     const where: any = { tenantId, active: true };
-    if (categoryId && categoryId !== 'all') where.categoryId = categoryId;
+    if (categoryId && categoryId !== "all") where.categoryId = categoryId;
 
     const items = await db.product.findMany({
       where,
-      orderBy: [{ title: 'asc' }],
-      include: { images: { orderBy: { position: 'asc' }, take: 1, include: { image: true } } },
+      orderBy: [{ title: "asc" }],
+      include: { images: { orderBy: { position: "asc" }, take: 1, include: { image: true } } },
     });
 
     return items.map(toProductDTO);
   },
 
-  /** ====== NEW: Universal Shop feed (global marketplace) ======
+  /** ====== Universal Shop feed (global marketplace) ======
    * Only shows products with publishToUniversal = true AND reviewStatus = 'approved'
    * Optional search (q) and category filter.
    */
@@ -163,18 +202,18 @@ export const CatalogService = {
     const where: any = {
       active: true,
       publishToUniversal: true,
-      reviewStatus: 'approved',
-      ...(q ? { title: { contains: q, mode: 'insensitive' } } : {}),
+      reviewStatus: "approved",
+      ...(q ? { title: { contains: q, mode: "insensitive" } } : {}),
       ...(categoryId ? { categoryId } : {}),
     };
 
     const items = await db.product.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       take: limit,
       ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
       include: {
-        images: { orderBy: { position: 'asc' }, take: 1, include: { image: true } },
+        images: { orderBy: { position: "asc" }, take: 1, include: { image: true } },
         tenant: { select: { id: true, slug: true, name: true, publicPhone: true } },
       },
     });
@@ -185,15 +224,13 @@ export const CatalogService = {
     };
   },
 
-  /** ====== NEW: Log contact from universal (message/call) ======
-   * Call this when user taps "Message Seller" or "Call Seller".
-   */
-  async logContactIntent(productId: string, buyerTgId: string, type: 'message' | 'call') {
+  /** ====== Log contact from universal (message/call) ====== */
+  async logContactIntent(productId: string, buyerTgId: string, type: "message" | "call") {
     const p = await db.product.findUnique({
       where: { id: productId },
       select: { id: true, tenantId: true },
     });
-    if (!p) throw new Error('Product not found');
+    if (!p) throw new Error("Product not found");
 
     await db.contactIntent.create({
       data: { tenantId: p.tenantId, productId: p.id, buyerTgId, type },
@@ -202,17 +239,17 @@ export const CatalogService = {
     return { ok: true };
   },
 
-  /** ====== NEW: Admin helpers (useful in bot or admin UI) ====== */
+  /** ====== Admin helpers (publish flags / moderation) ====== */
 
   // Toggle publish flags for a product (local/universal)
   async setPublishFlags(productId: string, flags: { isPublished?: boolean; publishToUniversal?: boolean }) {
-    const tenantId = await getTenantId();
+    await getTenantId(); // keep guard pattern; route should also enforce ownership/admin
     return db.product.update({
       where: { id: productId },
       data: {
         ...(flags.isPublished !== undefined ? { isPublished: flags.isPublished } : {}),
         ...(flags.publishToUniversal !== undefined
-          ? { publishToUniversal: flags.publishToUniversal, reviewStatus: 'pending' }
+          ? { publishToUniversal: flags.publishToUniversal, reviewStatus: "pending" }
           : {}),
       },
       select: { id: true, isPublished: true, publishToUniversal: true, reviewStatus: true },
@@ -220,7 +257,7 @@ export const CatalogService = {
   },
 
   // Moderation: approve/reject a product for universal feed
-  async reviewUniversalProduct(productId: string, status: 'approved' | 'rejected', reviewerId?: string) {
+  async reviewUniversalProduct(productId: string, status: "approved" | "rejected", reviewerId?: string) {
     // Platform admin guard should be enforced in the route/service caller.
     return db.product.update({
       where: { id: productId },

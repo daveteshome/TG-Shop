@@ -3,6 +3,8 @@ import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { api } from "../lib/api/index";
 import { getInitDataRaw } from "../lib/telegram";
 import ShopProfileDrawer from "../components/shop/ShopProfileDrawer";
+import CategoryCascader from "../components/CategoryCascader";
+import { useTranslation } from "react-i18next";
 
 type Product = {
   id: string;
@@ -13,11 +15,6 @@ type Product = {
   photoUrl?: string | null;
   categoryId?: string | null;
   stock?: number | null;
-};
-
-type Category = {
-  id: string;
-  title: string;
 };
 
 type UiImageNew = {
@@ -40,10 +37,9 @@ export default function Shop() {
   const { slug } = useParams<{ slug: string }>();
   const loc = useLocation();
   const nav = useNavigate();
+  const { t } = useTranslation();
 
-  //const [tenant, setTenant] = useState<{ id: string; name: string } | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
 
   // create form
   const [showCreate, setShowCreate] = useState(false);
@@ -79,36 +75,33 @@ export default function Shop() {
       next();
       return;
     }
-    const ok = window.confirm("You have unsaved changes. Discard them?");
+    const ok = window.confirm(t("confirm_discard_changes"));
     if (ok) {
       setFormDirty(false);
       next();
     }
   }
 
-async function loadProducts(shopSlug: string) {
-  const res = await api<{ items: Product[]; tenant: { id: string; name: string } }>(
-    `/shop/${shopSlug}/products`
-  );
-  setProducts(res.items);
+  async function loadProducts(shopSlug: string) {
+    const res = await api<{ items: Product[]; tenant: { id: string; name: string } }>(
+      `/shop/${shopSlug}/products`
+    );
+    setProducts(res.items);
     setTenant(prev => ({
-    id: res.tenant.id,
-    name: res.tenant.name,
-    // keep existing logo until we fetch the real one
-    logoWebUrl: prev?.logoWebUrl ?? null,
-  }));
+      id: res.tenant.id,
+      name: res.tenant.name,
+      logoWebUrl: prev?.logoWebUrl ?? null,
+    }));
 
+    // notify header context
+    window.dispatchEvent(
+      new CustomEvent("tgshop:set-shop-context", {
+        detail: { slug: shopSlug, name: res.tenant.name },
+      })
+    );
+  }
 
-  // 🔔 Tell the header what shop is active (logo unknown here → null)
-  window.dispatchEvent(
-    new CustomEvent("tgshop:set-shop-context", {
-      detail: { slug: shopSlug, name: res.tenant.name},
-    })
-  );
-}
-
-
-async function loadProductForEdit(shopSlug: string, productId: string) {
+  async function loadProductForEdit(shopSlug: string, productId: string) {
     const res = await api<{
       product: Product;
       images: { id: string; imageId: string | null; url: string | null; webUrl: string | null }[];
@@ -144,18 +137,6 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
   }, [slug]);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await api<Category[]>(`/categories`);
-        setCategories(Array.isArray(res) ? res : []);
-      } catch (err) {
-        console.warn("Failed to load universal categories", err);
-        setCategories([]);
-      }
-    })();
-  }, []);
-
-  useEffect(() => {
     function onOpenShopMenu() { setProfileOpen(true); }
     window.addEventListener("tgshop:open-shop-menu", onOpenShopMenu);
     return () => window.removeEventListener("tgshop:open-shop-menu", onOpenShopMenu);
@@ -165,44 +146,30 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
     if (!slug) return;
     (async () => {
       try {
-        const t = await api<{ id: string; name: string; logoWebUrl?: string | null }>(`/shop/${slug}`);
+        const tnt = await api<{ id: string; name: string; logoWebUrl?: string | null }>(`/shop/${slug}`);
         setTenant(prev => ({
-  ...prev,
-  id: t.id,
-  name: t.name,
-  logoWebUrl: (typeof t.logoWebUrl === "string" && t.logoWebUrl.length > 0)
-    ? t.logoWebUrl
-    : (prev?.logoWebUrl ?? null),
-      }));
+          ...prev,
+          id: tnt.id,
+          name: tnt.name,
+          logoWebUrl: (typeof tnt.logoWebUrl === "string" && tnt.logoWebUrl.length > 0)
+            ? tnt.logoWebUrl
+            : (prev?.logoWebUrl ?? null),
+        }));
 
-      window.dispatchEvent(new CustomEvent("tgshop:set-shop-context", {
-        detail: {
-          slug,
-          name: t.name,
-          ...(t.logoWebUrl ? { logoWebUrl: t.logoWebUrl } : {}), // include only if truthy
-        },
-      }));
-
-
-        // emit context, but don’t force null into the stream
-        window.dispatchEvent(
-          new CustomEvent("tgshop:set-shop-context", {
-            detail: {
-              slug,
-              name: t.name,
-              ...(t.logoWebUrl ? { logoWebUrl: t.logoWebUrl } : {}), // include only if truthy
-            },
-          })
-        );
-
+        window.dispatchEvent(new CustomEvent("tgshop:set-shop-context", {
+          detail: {
+            slug,
+            name: tnt.name,
+            ...(tnt.logoWebUrl ? { logoWebUrl: tnt.logoWebUrl } : {}),
+          },
+        }));
       } catch {
-        /* ignore — we already sent name with null logo */
+        /* ignore */
       }
     })();
   }, [slug]);
 
-  // 👇 listens for Add product button click from the global header
-  // 👇 listens for Add product button click from the global header
+  // header "Add product" listener
   useEffect(() => {
     function onAddProduct() {
       guardLeave(() => {
@@ -213,42 +180,27 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
         setCreateImages([]);
       });
     }
-
     window.addEventListener("tgshop:add-product", onAddProduct);
     return () => window.removeEventListener("tgshop:add-product", onAddProduct);
-    // formDirty is ok here if you want guardLeave to reflect current state
   }, [formDirty]);
-
-  // 👇 listens for opening the Shop Profile drawer from the header avatar
-  useEffect(() => {
-    function onOpenShopMenu() {
-      setProfileOpen(true);
-    }
-    window.addEventListener("tgshop:open-shop-menu", onOpenShopMenu);
-    return () => window.removeEventListener("tgshop:open-shop-menu", onOpenShopMenu);
-  }, []);
-
-
 
   // =============== CREATE ===============
   async function handleCreateProduct() {
     if (!slug) return;
     if (!pTitle.trim()) {
-      setSaveErr("Title is required");
+      setSaveErr(t("err_title_required"));
       return;
     }
 
     const priceNum = Number(pPrice);
     if (!pPrice.trim() || Number.isNaN(priceNum) || priceNum <= 0) {
-      // 👈 back to your rule: must be > 0
-      setSaveErr("Price must be a number greater than 0");
+      setSaveErr(t("err_price_gt_zero"));
       return;
     }
 
     const stockNum = Number(pStock);
     if (!pStock.trim() || Number.isNaN(stockNum) || stockNum <= 0 || !Number.isInteger(stockNum)) {
-      // 👈 also back to your rule
-      setSaveErr("Stock must be a whole number greater than 0");
+      setSaveErr(t("err_stock_integer_gt_zero"));
       return;
     }
 
@@ -296,7 +248,7 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
       setShowCreate(false);
       setFormDirty(false);
     } catch (e: any) {
-      setSaveErr(e?.message || "Failed to create product");
+      setSaveErr(e?.message || t("err_create_product_failed"));
     } finally {
       setSaving(false);
     }
@@ -306,19 +258,19 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
   async function handleUpdateProduct() {
     if (!slug || !editingId) return;
     if (!pTitle.trim()) {
-    setSaveErr("Title is required");
-    return;
+      setSaveErr(t("err_title_required"));
+      return;
     }
 
     const priceNum = Number(pPrice);
     if (!pPrice.trim() || Number.isNaN(priceNum) || priceNum <= 0) {
-      setSaveErr("Price must be a number greater than 0");
+      setSaveErr(t("err_price_gt_zero"));
       return;
     }
 
     const stockNum = Number(pStock);
     if (!pStock.trim() || Number.isNaN(stockNum) || stockNum <= 0 || !Number.isInteger(stockNum)) {
-      setSaveErr("Stock must be a whole number greater than 0");
+      setSaveErr(t("err_stock_integer_gt_zero"));
       return;
     }
 
@@ -348,10 +300,10 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
 
       for (const img of editImages) {
         if (img.kind === "existing") {
-          imagesReplace.push({ type: "existing", productImageId: img.productImageId });
-          if (img.imageId) imageIds.push(img.imageId);
+          imagesReplace.push({ type: "existing", productImageId: (img as UiImageExisting).productImageId });
+          if ((img as UiImageExisting).imageId) imageIds.push((img as UiImageExisting).imageId!);
         } else {
-          const up = uploadedNew.find((u) => u.tempId === img.tempId);
+          const up = uploadedNew.find((u) => u.tempId === (img as UiImageNew).tempId);
           if (up) {
             imagesReplace.push({ type: "new", imageId: up.imageId });
             imageIds.push(up.imageId);
@@ -387,7 +339,7 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
       setPCategory(null);
       setPStock("1");
     } catch (e: any) {
-      setSaveErr(e?.message || "Failed to update product");
+      setSaveErr(e?.message || t("err_update_product_failed"));
     } finally {
       setSaving(false);
     }
@@ -406,18 +358,17 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
   if (!slug) {
     return (
       <div style={{ padding: 16 }}>
-        <p>No shop selected.</p>
+        <p>{t("msg_no_shop_selected")}</p>
       </div>
     );
   }
 
   return (
     <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 16 }}>
-
       {/* create panel */}
       {showCreate && (
         <div style={panel}>
-          <strong style={{ fontSize: 14 }}>New product</strong>
+          <strong style={{ fontSize: 14 }}>{t("title_new_product")}</strong>
           {saveErr ? <div style={{ color: "crimson", fontSize: 13 }}>{saveErr}</div> : null}
 
           <input
@@ -426,7 +377,7 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
               setPTitle(e.target.value);
               markDirty();
             }}
-            placeholder="Product title"
+            placeholder={t("ph_product_title")}
             style={input}
           />
 
@@ -437,7 +388,7 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
                 setPPrice(e.target.value);
                 markDirty();
               }}
-              placeholder="Price"
+              placeholder={t("ph_price")}
               style={{ ...input, flex: 1 }}
               type="number"
               min={1}
@@ -458,21 +409,10 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
             </select>
           </div>
 
-          <select
-            value={pCategory ?? ""}
-            onChange={(e) => {
-              setPCategory(e.target.value || null);
-              markDirty();
-            }}
-            style={input}
-          >
-            <option value="">No category</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.title}
-              </option>
-            ))}
-          </select>
+          {/* Category (cascader, icons hidden in this context) */}
+          <CategoryCascader 
+            value={pCategory} 
+            onChange={(id) => { setPCategory(id); markDirty(); }} />
 
           <textarea
             value={pDesc}
@@ -480,13 +420,13 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
               setPDesc(e.target.value);
               markDirty();
             }}
-            placeholder="Description (optional)"
+            placeholder={t("ph_description_optional")}
             style={{ ...input, minHeight: 70, resize: "vertical" }}
           />
 
           <div>
             <label style={{ fontSize: 13, fontWeight: 500, display: "block", marginBottom: 4 }}>
-              Stock (available units)
+              {t("label_stock_units")}
             </label>
             <input
               value={pStock}
@@ -506,7 +446,9 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
 
           {/* images create */}
           <div>
-            <label style={{ fontSize: 13, fontWeight: 500, display: "block", marginBottom: 4 }}>Images</label>
+            <label style={{ fontSize: 13, fontWeight: 500, display: "block", marginBottom: 4 }}>
+              {t("label_images")}
+            </label>
 
             <input
               ref={createFileInputRef}
@@ -536,15 +478,15 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
               onClick={() => createFileInputRef.current?.click()}
               style={{ ...secondaryBtn, marginTop: 4 }}
             >
-              Choose images
+              {t("btn_choose_images")}
             </button>
 
             <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4 }}>
               {createImages.length === 0
-                ? "No images selected"
+                ? t("msg_no_images_selected")
                 : createImages.length === 1
-                ? "1 image selected"
-                : `${createImages.length} images selected`}
+                ? t("msg_one_image_selected")
+                : t("msg_many_images_selected", { count: createImages.length })}
             </div>
 
             {createImages.length > 0 ? (
@@ -566,10 +508,11 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
                     <button
                       onClick={() => setCreateImages((prev) => prev.filter((x) => x.tempId !== img.tempId))}
                       style={thumbDeleteBtn}
+                      aria-label={t("aria_remove_image")}
                     >
                       ×
                     </button>
-                    {index === 0 ? <div style={thumbCoverTag}>Cover</div> : null}
+                    {index === 0 ? <div style={thumbCoverTag}>{t("tag_cover")}</div> : null}
                   </div>
                 ))}
               </div>
@@ -577,7 +520,7 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
           </div>
 
           <button onClick={handleCreateProduct} disabled={saving} style={primaryBtn}>
-            {saving ? "Creating…" : "Create product"}
+            {saving ? t("btn_creating") : t("btn_create_product")}
           </button>
           <button
             onClick={() =>
@@ -588,7 +531,7 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
             }
             style={secondaryBtn}
           >
-            Cancel
+            {t("btn_cancel")}
           </button>
         </div>
       )}
@@ -603,7 +546,7 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
             borderRadius: 12,
           }}
         >
-          No products yet.
+          {t("msg_no_products_yet")}
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -643,7 +586,9 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
                   <div style={{ fontSize: 13, opacity: 0.7 }}>
                     {p.price} {p.currency}
                   </div>
-                  <div style={{ fontSize: 11, opacity: 0.5 }}>Stock: {p.stock ?? 0}</div>
+                  <div style={{ fontSize: 11, opacity: 0.5 }}>
+                    {t("label_stock_short")}: {p.stock ?? 0}
+                  </div>
                 </div>
                 <button
                   onClick={(e) => {
@@ -658,13 +603,13 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
                   }}
                   style={smallBtn}
                 >
-                  Edit
+                  {t("btn_edit")}
                 </button>
               </div>
 
               {showEdit && editingId === p.id ? (
                 <div style={{ ...panel, marginTop: 6 }}>
-                  <strong style={{ fontSize: 14 }}>Edit product</strong>
+                  <strong style={{ fontSize: 14 }}>{t("title_edit_product")}</strong>
                   {saveErr ? <div style={{ color: "crimson", fontSize: 13 }}>{saveErr}</div> : null}
 
                   <input
@@ -673,7 +618,7 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
                       setPTitle(e.target.value);
                       markDirty();
                     }}
-                    placeholder="Product title"
+                    placeholder={t("ph_product_title")}
                     style={input}
                   />
 
@@ -684,7 +629,7 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
                         setPPrice(e.target.value);
                         markDirty();
                       }}
-                      placeholder="Price"
+                      placeholder={t("ph_price")}
                       style={{ ...input, flex: 1 }}
                       type="number"
                       min={1}
@@ -705,21 +650,8 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
                     </select>
                   </div>
 
-                  <select
-                    value={pCategory ?? ""}
-                    onChange={(e) => {
-                      setPCategory(e.target.value || null);
-                      markDirty();
-                    }}
-                    style={input}
-                  >
-                    <option value="">No category</option>
-                    {categories.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.title}
-                      </option>
-                    ))}
-                  </select>
+                  {/* Category (cascader, icons hidden in this context) */}
+                  <CategoryCascader value={pCategory} onChange={(id) => { setPCategory(id); markDirty(); }} />
 
                   <textarea
                     value={pDesc}
@@ -727,12 +659,14 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
                       setPDesc(e.target.value);
                       markDirty();
                     }}
-                    placeholder="Description (optional)"
+                    placeholder={t("ph_description_optional")}
                     style={{ ...input, minHeight: 60 }}
                   />
 
                   <div>
-                    <label style={{ fontSize: 13, fontWeight: 500, display: "block", marginBottom: 4 }}>Stock</label>
+                    <label style={{ fontSize: 13, fontWeight: 500, display: "block", marginBottom: 4 }}>
+                      {t("label_stock")}
+                    </label>
                     <input
                       value={pStock}
                       onChange={(e) => {
@@ -752,7 +686,7 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
                   {/* edit images */}
                   <div>
                     <label style={{ fontSize: 13, fontWeight: 500, display: "block", marginBottom: 4 }}>
-                      Images (existing + new)
+                      {t("label_images_existing_new")}
                     </label>
                     <input
                       ref={editFileInputRef}
@@ -778,25 +712,25 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
                     />
 
                     <button type="button" onClick={() => editFileInputRef.current?.click()} style={secondaryBtn}>
-                      Choose images
+                      {t("btn_choose_images")}
                     </button>
 
                     <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4 }}>
                       {editImages.length === 0
-                        ? "No images selected"
+                        ? t("msg_no_images_selected")
                         : editImages.length === 1
-                        ? "1 image selected"
-                        : `${editImages.length} images selected`}
+                        ? t("msg_one_image_selected")
+                        : t("msg_many_images_selected", { count: editImages.length })}
                     </div>
 
                     {editImages.length > 0 ? (
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
                         {editImages.map((img, index) => {
                           const isCover = index === 0;
-                          const url = img.kind === "existing" ? img.url : img.previewUrl;
+                          const url = img.kind === "existing" ? img.url : (img as UiImageNew).previewUrl;
                           return (
                             <div
-                              key={img.kind === "existing" ? img.productImageId : img.tempId}
+                              key={img.kind === "existing" ? (img as UiImageExisting).productImageId : (img as UiImageNew).tempId}
                               style={{
                                 width: 62,
                                 height: 62,
@@ -814,12 +748,13 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
                                   setEditImages((prev) =>
                                     prev.filter((x) =>
                                       x.kind === "existing"
-                                        ? x.productImageId !== (img as UiImageExisting).productImageId
-                                        : x.tempId !== (img as UiImageNew).tempId
+                                        ? (x as UiImageExisting).productImageId !== (img as UiImageExisting).productImageId
+                                        : (x as UiImageNew).tempId !== (img as UiImageNew).tempId
                                     )
                                   );
                                 }}
                                 style={thumbDeleteBtn}
+                                aria-label={t("aria_remove_image")}
                               >
                                 ×
                               </button>
@@ -831,8 +766,8 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
                                       const copy = [...prev];
                                       const i = copy.findIndex((x) =>
                                         x.kind === "existing"
-                                          ? x.productImageId === (img as UiImageExisting).productImageId
-                                          : x.tempId === (img as UiImageNew).tempId
+                                          ? (x as UiImageExisting).productImageId === (img as UiImageExisting).productImageId
+                                          : (x as UiImageNew).tempId === (img as UiImageNew).tempId
                                       );
                                       if (i <= 0) return copy;
                                       const [item] = copy.splice(i, 1);
@@ -845,7 +780,7 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
                                   ★
                                 </button>
                               ) : (
-                                <div style={thumbCoverTag}>Cover</div>
+                                <div style={thumbCoverTag}>{t("tag_cover")}</div>
                               )}
                               <div style={thumbMoveRow}>
                                 <button
@@ -854,6 +789,7 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
                                     setEditImages((prev) => moveImage(prev, index, -1));
                                   }}
                                   style={thumbMoveBtn}
+                                  aria-label={t("aria_move_image_up")}
                                 >
                                   ↑
                                 </button>
@@ -863,6 +799,7 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
                                     setEditImages((prev) => moveImage(prev, index, +1));
                                   }}
                                   style={thumbMoveBtn}
+                                  aria-label={t("aria_move_image_down")}
                                 >
                                   ↓
                                 </button>
@@ -876,7 +813,7 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
 
                   <div style={{ display: "flex", gap: 8 }}>
                     <button onClick={handleUpdateProduct} disabled={saving} style={primaryBtn}>
-                      {saving ? "Saving…" : "Save changes"}
+                      {saving ? t("btn_saving") : t("btn_save_changes")}
                     </button>
                     <button
                       onClick={() =>
@@ -888,7 +825,7 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
                       }
                       style={secondaryBtn}
                     >
-                      Cancel
+                      {t("btn_cancel")}
                     </button>
                   </div>
                 </div>
@@ -897,7 +834,8 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
           ))}
         </div>
       )}
-      {/* Shop Profile Drawer (opens from right) */}
+
+      {/* Shop Profile Drawer */}
       <ShopProfileDrawer
         open={profileOpen}
         onClose={() => setProfileOpen(false)}
@@ -908,7 +846,6 @@ async function loadProductForEdit(shopSlug: string, productId: string) {
           publishUniversal: false,
         }}
       />
-
     </div>
   );
 }
@@ -1014,30 +951,5 @@ const thumbMoveBtn: React.CSSProperties = {
   fontSize: 10,
   width: 20,
   height: 16,
-  cursor: "pointer",
-};
-
-const iconBtn: React.CSSProperties = {
-  width: 34,
-  height: 34,
-  borderRadius: 8,
-  border: "1px solid rgba(0,0,0,.08)",
-  background: "#fff",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  fontSize: 16,
-  cursor: "pointer",
-};
-
-const avatarBtn: React.CSSProperties = {
-  width: 34,
-  height: 34,
-  borderRadius: "999px",
-  border: "1px solid rgba(0,0,0,.08)",
-  background: "#eee",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
   cursor: "pointer",
 };

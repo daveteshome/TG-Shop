@@ -128,26 +128,26 @@ model Tenant {
 
   // Public profile / universal marketplace controls
   publicPhone      String?
-  publishUniversal Boolean      @default(false)
+  publishUniversal Boolean @default(false)
 
   // NEW: shop public/profile fields
-  description        String?       // short text for header / shop card
-  aboutText          String?       // longer text for "About" tab
-  location           String?       // e.g. "Addis Ababa"
-  deliveryRules      String?       // e.g. "Delivery 200 ETB", "Pickup only"
-  status             ShopStatus    @default(open)
-  deliveryMode       DeliveryMode  @default(both)
-  logoImageId        String? 
+  description        String? // short text for header / shop card
+  aboutText          String? // longer text for "About" tab
+  location           String? // e.g. "Addis Ababa"
+  deliveryRules      String? // e.g. "Delivery 200 ETB", "Pickup only"
+  status             ShopStatus   @default(open)
+  deliveryMode       DeliveryMode @default(both)
+  logoImageId        String?
   bannerUrl          String?
   defaultCurrency    Currency?
-  minOrderAmount     Decimal?      @db.Decimal(10, 2)
-  businessHours      Json?         // flexible open/close per day
-  publicTelegramLink String?       // public channel/group/bot for buyers
+  minOrderAmount     Decimal?     @db.Decimal(10, 2)
+  businessHours      Json? // flexible open/close per day
+  publicTelegramLink String? // public channel/group/bot for buyers
 
   // Per-tenant Telegram config
-  botToken     String?
-  botUsername  String?
-  postChatId   String?
+  botToken    String?
+  botUsername String?
+  postChatId  String?
 
   // Hardening for future encrypted bot tokens
   botTokenEnc    Bytes?
@@ -168,7 +168,6 @@ model Tenant {
   invoices        TenantInvoice[]
   tenantPayments  TenantPayment[]
   products        Product[]
-  categories      Category[]
   carts           Cart[]
   orders          Order[]
   shipments       Shipment[]
@@ -183,7 +182,7 @@ model Tenant {
   membershipAudit MembershipAudit[]
 
   // if you add pinned model ↓
-  pinnedProducts   PinnedProduct[]
+  pinnedProducts PinnedProduct[]
 
   @@index([slug])
 }
@@ -203,13 +202,13 @@ model PinnedProduct {
 }
 
 model User {
-  tgId         String        @id
+  tgId         String       @id
   username     String?
   name         String?
   phone        String?
-  platformRole PlatformRole  @default(USER)
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  platformRole PlatformRole @default(USER)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
 
   orders      Order[]
   carts       Cart[]
@@ -238,8 +237,8 @@ model Address {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user   User   @relation(fields: [userId], references: [tgId])
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User    @relation(fields: [userId], references: [tgId])
   Order  Order[]
 
   @@unique([tenantId, userId, label])
@@ -248,22 +247,55 @@ model Address {
 }
 
 /// ===== Catalog =====
-
 model Category {
-  id        String   @id @default(cuid())
-  tenantId  String
-  title     String
-  slug      String
-  position  Int      @default(0)
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String  @id @default(cuid())
+  slug        String  @unique
+  name        String  @map("title")
+  description String?
 
-  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  icon     String? // ✅ optional emoji or small icon name (e.g. "🚗" or "mdi-car")
+  imageId  String? // ✅ optional R2 image (for thumbnails)
+  // hierarchy
+  parentId String?
+  parent   Category?  @relation("CategoryChildren", fields: [parentId], references: [id], onDelete: SetNull)
+  children Category[] @relation("CategoryChildren")
+
+  level    Int     @default(0)
+  position Int     @default(0)
+  isActive Boolean @default(true) @map("active")
+
   products Product[]
 
-  @@unique([tenantId, slug], name: "tenantId_slug")
-  @@index([tenantId, active, position])
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  CategoryName    CategoryName[]
+  CategorySynonym CategorySynonym[]
+
+  @@index([parentId, position])
+  @@index([isActive])
+  @@index([level])
+}
+
+model CategoryName {
+  id         String   @id @default(cuid())
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  locale     String // e.g., "en", "de", "am"
+  name       String
+
+  @@unique([categoryId, locale])
+  @@index([locale])
+}
+
+model CategorySynonym {
+  id         String   @id @default(cuid())
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  locale     String? // null = global synonym
+  value      String
+
+  @@index([categoryId])
+  @@index([value])
 }
 
 model Product {
@@ -274,10 +306,11 @@ model Product {
   sku         String?
   price       Decimal  @db.Decimal(10, 2)
   currency    Currency
-  stock       Int      @default(0)
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+
+  stock     Int      @default(0)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Category
   categoryId String?
@@ -291,7 +324,7 @@ model Product {
   reviewedBy         String?
 
   // Relations
-  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant         Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   images         ProductImage[]
   variants       ProductVariant[]
   favorites      Favorite[]
@@ -302,7 +335,7 @@ model Product {
   views          ProductView[]
   reports        Report[]
 
-  pinnedInShops  PinnedProduct[]
+  pinnedInShops PinnedProduct[]
 
   @@unique([tenantId, sku])
   @@index([tenantId])
@@ -395,8 +428,8 @@ model Cart {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user   User   @relation(fields: [userId], references: [tgId])
+  tenant Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User       @relation(fields: [userId], references: [tgId])
   items  CartItem[]
 
   @@unique([tenantId, userId]) // one cart per user *per tenant*
@@ -452,11 +485,11 @@ model Order {
   shipCountry String?
   shipPostal  String?
 
-  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user     User            @relation(fields: [userId], references: [tgId])
-  address  Address?        @relation(fields: [addressId], references: [id])
-  items    OrderItem[]
-  payments PaymentIntent[]
+  tenant    Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user      User            @relation(fields: [userId], references: [tgId])
+  address   Address?        @relation(fields: [addressId], references: [id])
+  items     OrderItem[]
+  payments  PaymentIntent[]
   shipments Shipment[]
 
   @@index([tenantId])
@@ -491,15 +524,15 @@ model OrderItem {
 
 /// Shipment / fulfillment lifecycle (separate from payment)
 model Shipment {
-  id         String         @id @default(cuid())
-  tenantId   String
-  orderId    String
-  status     ShipmentStatus @default(pending)
-  carrier    String?
-  trackingNo String?
-  shippedAt  DateTime?
+  id          String         @id @default(cuid())
+  tenantId    String
+  orderId     String
+  status      ShipmentStatus @default(pending)
+  carrier     String?
+  trackingNo  String?
+  shippedAt   DateTime?
   deliveredAt DateTime?
-  meta       Json?
+  meta        Json?
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   order  Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -529,12 +562,12 @@ model Favorite {
 /// ===== Universal Shop: Contacts, Memberships, Invites, Sessions, Views, Reports =====
 
 model ContactIntent {
-  id         String      @id @default(cuid())
-  tenantId   String
-  productId  String
-  buyerTgId  String
-  type       ContactType
-  createdAt  DateTime    @default(now())
+  id        String      @id @default(cuid())
+  tenantId  String
+  productId String
+  buyerTgId String
+  type      ContactType
+  createdAt DateTime    @default(now())
 
   tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -574,15 +607,15 @@ model Membership {
 }
 
 model ShopInvite {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   tenantId  String
-  code      String   @unique
-  role      ShopRole @default(MEMBER)
+  code      String    @unique
+  role      ShopRole  @default(MEMBER)
   createdBy String
   maxUses   Int?
-  usedCount Int      @default(0)
+  usedCount Int       @default(0)
   expiresAt DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -591,12 +624,12 @@ model ShopInvite {
 }
 
 model MiniAppSession {
-  id        String   @id @default(cuid())
-  userId    String
-  tgChatId  String?
-  initHash  String
-  openedAt  DateTime @default(now())
-  tenantId  String?
+  id       String   @id @default(cuid())
+  userId   String
+  tgChatId String?
+  initHash String
+  openedAt DateTime @default(now())
+  tenantId String?
 
   user   User    @relation(fields: [userId], references: [tgId])
   tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
@@ -642,7 +675,7 @@ model Report {
   resolvedAt   DateTime?
   resolvedBy   String?
 
-  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, createdAt])
@@ -651,14 +684,14 @@ model Report {
 
 /// Audit trail for membership changes (optional but recommended)
 model MembershipAudit {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   tenantId  String
-  actorId   String   // who performed the change (OWNER/ADMIN)
-  targetId  String   // whose membership changed
-  action    String   // "INVITE_CREATE" | "JOIN_ACCEPT" | "ROLE_UPDATE" | "REMOVE" | "TRANSFER_OWNERSHIP"
+  actorId   String // who performed the change (OWNER/ADMIN)
+  targetId  String // whose membership changed
+  action    String // "INVITE_CREATE" | "JOIN_ACCEPT" | "ROLE_UPDATE" | "REMOVE" | "TRANSFER_OWNERSHIP"
   fromRole  ShopRole?
   toRole    ShopRole?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 

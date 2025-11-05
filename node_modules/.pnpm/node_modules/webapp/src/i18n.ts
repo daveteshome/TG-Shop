@@ -80,6 +80,62 @@ i18n
           images: "Images",
           images_selected: "{{count}} image selected",
           images_selected_plural: "{{count}} images selected",
+
+            // generic
+          msg_not_found: "Not found",
+          msg_no_description: "No description",
+          confirm_discard_changes: "You have unsaved changes. Discard them?",
+          aria_back: "Back",
+
+          // nav / labels
+          label_stock_units: "Stock (available units)",
+          label_stock: "Stock",
+          label_stock_short: "Stock",
+          label_images: "Images",
+          label_images_existing_new: "Images (existing + new)",
+
+          // category cascader (shared)
+          select_category: "Select a category",
+          no_category: "No category",
+          back: "Back",
+
+          // create/edit product (Shop.tsx)
+          title_new_product: "New product",
+          title_edit_product: "Edit product",
+          ph_product_title: "Product title",
+          ph_title: "Title",
+          ph_price: "Price",
+          ph_description_optional: "Description (optional)",
+          ph_description: "Description",
+          ph_stock_units: "Stock (units)",
+          btn_choose_images: "Choose images",
+          msg_no_images_selected: "No images selected",
+          msg_one_image_selected: "1 image selected",
+          msg_many_images_selected: "{{count}} images selected",
+          btn_create_product: "Create product",
+          btn_creating: "Creating…",
+          btn_save_changes: "Save changes",
+          btn_saving: "Saving…",
+          btn_cancel: "Cancel",
+          btn_edit: "Edit",
+          btn_close: "Close",
+          tag_cover: "Cover",
+          aria_remove_image: "Remove image",
+          aria_move_image_up: "Move image up",
+          aria_move_image_down: "Move image down",
+
+          // errors
+          err_title_required: "Title is required",
+          err_price_gt_zero: "Price must be a number greater than 0",
+          err_stock_integer_gt_zero: "Stock must be a whole number greater than 0",
+          err_create_product_failed: "Failed to create product",
+          err_update_product_failed: "Failed to update product",
+          err_load_product_failed: "Failed to load product",
+          err_save_failed: "Failed to save",
+
+          // list empty
+          msg_no_products_yet: "No products yet.",
+          msg_no_shop_selected: "No shop selected.",
         },
       },
       am: {

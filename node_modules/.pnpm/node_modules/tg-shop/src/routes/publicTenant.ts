@@ -86,7 +86,7 @@ publicTenantRouter.get("/tenant/:slug/products", async (req, res, next) => {
           take: 1,
         },
         category: {
-          select: { title: true },
+          select: { name: true },
         },
       },
     });
@@ -105,7 +105,7 @@ publicTenantRouter.get("/tenant/:slug/products", async (req, res, next) => {
         // your schema names:
         isPublished: p.isPublished,
         publishToUniversal: p.publishToUniversal,
-        category: p.category ? p.category.title : null,
+        category: p.category ? p.category.name : null,
         image: img?.url || null,
       };
     });
