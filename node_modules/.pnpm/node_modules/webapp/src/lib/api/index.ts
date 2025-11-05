@@ -3,6 +3,41 @@ import { getInitDataRaw } from "../telegram";
 
 const API_BASE =  '/api';
 
+// --- add near your other exported types/helpers ---
+
+// --- Add in apps/webapp/src/lib/api/index.ts ---
+
+export type CreateTenantPayload = {
+  name: string;
+  publicPhone?: string | null;
+  description?: string | null;
+  publishUniversal?: boolean;
+  logoImageId?: string | null;
+};
+
+export type TenantDTO = {
+  id: string;
+  slug: string;
+  name: string;
+  publicPhone?: string | null;
+  description?: string | null;
+  publishUniversal?: boolean;
+  logoImageId?: string | null;
+  // logoWebUrl?: string | null; // include if your backend returns it
+};
+
+export async function createTenantFull(
+  payload: CreateTenantPayload
+): Promise<{ tenant: TenantDTO }> {
+  return api("/tenants", {
+    method: "POST",
+    // ✅ ensure JSON header is set (your api() may do it, but be explicit)
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers as HeadersInit);
 

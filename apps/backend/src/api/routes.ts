@@ -109,28 +109,6 @@ api.get("/_debug/tenant-cats", async (_req, res) => {
 // -------- AUTH GUARD --------
 api.use(telegramAuth);
 
-// apps/backend/src/server/routes.ts  (add near other routes)
-api.post('/tenants', async (req: any, res) => {
-  // requires telegramAuth earlier so req.userId is set
-  const userId = req.userId!;
-  const { name } = req.body || {};
-  if (!name || String(name).trim().length < 3) return res.status(400).json({ error: 'name_too_short' });
-
-  const clean = String(name).trim();
-  const slugBase = clean.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
-  const slug = slugBase || `shop-${Math.random().toString(36).slice(2, 6)}`;
-
-  const exists = await db.tenant.findUnique({ where: { slug } });
-  const finalSlug = exists ? `${slug}-${Math.random().toString(36).slice(2, 4)}` : slug;
-
-  const tenant = await db.$transaction(async (tx) => {
-    const t = await tx.tenant.create({ data: { slug: finalSlug, name: clean } });
-    await tx.membership.create({ data: { tenantId: t.id, userId, role: 'OWNER' } });
-    return t;
-  });
-
-  res.json({ tenant });
-});
 
 
 // GET /shops/list?userId=123
@@ -294,28 +272,147 @@ api.delete('/tenants/:tenantId/members/:userId', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// POST /api/tenants  { name }  → creates tenant and OWNER membership
+// POST /api/tenants – create tenant with full payload, default publishUniversal=true, reassign logo
+// 🔎 tiny helper for consistent log prefix
+function logStep(step: string, extra?: any) {
+  if (extra !== undefined) {
+    console.log(`🧭 [create-tenant] ${step}`, extra);
+  } else {
+    console.log(`🧭 [create-tenant] ${step}`);
+  }
+}
+function logErr(step: string, err: any) {
+  console.error(`💥 [create-tenant][ERROR] ${step}:`, err?.message || err, err?.stack);
+}
+
+// POST /api/tenants – create tenant with full payload, default publishUniversal=true, reassign logo
 api.post("/tenants", async (req: any, res, next) => {
+  const t0 = Date.now();
   try {
-    const userId = req.userId!;
-    const { name } = (req.body ?? {}) as { name: string };
-    if (!name || String(name).trim().length < 3) return res.status(400).json({ error: "name_too_short" });
-    const clean = String(name).trim();
-    const slugBase = clean.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
-    const slug = slugBase || `shop-${Math.random().toString(36).slice(2, 6)}`;
+    logStep("hit /tenants");
+    logStep("headers", { "content-type": req.headers["content-type"], auth: Boolean(req.headers.authorization) });
+    logStep("raw body keys", Object.keys(req.body || {}));
 
-    const exists = await db.tenant.findUnique({ where: { slug } });
-    const finalSlug = exists ? `${slug}-${Math.random().toString(36).slice(2, 4)}` : slug;
+    const userId = req.userId;
+    if (!userId) {
+      logStep("no userId → 401");
+      return res.status(401).json({ error: "unauthorized" });
+    }
 
-    const tenant = await db.$transaction(async (tx) => {
-      const t = await tx.tenant.create({ data: { slug: finalSlug, name: clean } });
-      await tx.membership.create({ data: { tenantId: t.id, userId, role: 'OWNER' } });
-      return t;
+    const {
+      name,
+      publicPhone = null,
+      description = null,
+      publishUniversal,
+      logoImageId = null,
+    } = req.body || {};
+
+    logStep("parsed body", { name, publicPhone, hasDesc: Boolean(description), publishUniversal, logoImageId });
+
+    if (!name || typeof name !== "string" || !name.trim()) {
+      logStep("invalid name → 400");
+      return res.status(400).json({ error: "name_required" });
+    }
+    const publishFlag =
+      typeof publishUniversal === "boolean" ? publishUniversal : true; // default TRUE
+
+    async function makeUniqueSlug(base: string): Promise<string> {
+      const slugBase =
+        base
+          .toLowerCase()
+          .normalize("NFKD")
+          .replace(/[\u0300-\u036f]/g, "")
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 48) || "shop";
+      let candidate = slugBase;
+      let i = 1;
+      while (await db.tenant.findUnique({ where: { slug: candidate } })) {
+        i++;
+        candidate = `${slugBase}-${i}`;
+      }
+      return candidate;
+    }
+
+    const result = await db.$transaction(async (tx) => {
+      logStep("transaction start");
+
+      const slug = await makeUniqueSlug(name.trim());
+      logStep("slug generated", { slug });
+
+      // 1) Create tenant
+      logStep("creating tenant…");
+      const tenant = await tx.tenant.create({
+        data: {
+          slug,
+          name: name.trim(),
+          publicPhone,
+          description,
+          publishUniversal: publishFlag,
+        },
+      });
+      logStep("tenant created", { id: tenant.id, slug: tenant.slug });
+
+      // 2) Owner membership
+      logStep("creating owner membership…");
+      await tx.membership.create({
+        data: { tenantId: tenant.id, userId, role: "OWNER" },
+      });
+      logStep("owner membership created");
+
+      // 3) Optional: reassign uploaded logo, set tenant.logoImageId
+      let finalTenant = tenant;
+      if (logoImageId && typeof logoImageId === "string") {
+        logStep("logo reassignment start", { logoImageId });
+
+        const img = await tx.image.findUnique({ where: { id: logoImageId } });
+        if (!img) {
+          logStep("logo not found → 400");
+          const e: any = new Error("image_not_found");
+          e.code = 400;
+          throw e;
+        }
+        logStep("logo found", { imgId: img.id, currentTenantId: img.tenantId });
+
+        if (img.tenantId !== tenant.id) {
+          logStep("updating image.tenantId…", { toTenantId: tenant.id });
+          await tx.image.update({
+            where: { id: img.id },
+            data: { tenantId: tenant.id },
+          });
+          logStep("image.tenantId updated");
+        } else {
+          logStep("image already owned by tenant");
+        }
+
+        logStep("updating tenant.logoImageId…");
+        finalTenant = await tx.tenant.update({
+          where: { id: tenant.id },
+          data: { logoImageId: img.id },
+        });
+        logStep("tenant.logoImageId set");
+      } else {
+        logStep("no logo provided, skipping reassignment");
+      }
+
+      logStep("transaction end");
+      return finalTenant;
     });
 
-    res.json({ tenant });
-  } catch (e) { next(e); }
+    logStep("success response", { id: result.id, slug: result.slug });
+    res.json({ tenant: result });
+
+    logStep("done", { ms: Date.now() - t0 });
+  } catch (err: any) {
+    logErr("outer catch", err);
+    if (err?.code === 400) {
+      return res.status(400).json({ error: err.message || "bad_request" });
+    }
+    next(err);
+  }
 });
+
+
 
 // UNIVERSAL FEED
 api.get('/universal', async (req, res, next) => {
@@ -378,6 +475,8 @@ api.post("/shop/:slug/products", resolveTenant, async (req: any, res, next) => {
           categoryId: categoryId ?? null,
           stock: stockNumRaw,
           active,
+          isPublished: true,
+          publishToUniversal: true,
         },
       });
 
