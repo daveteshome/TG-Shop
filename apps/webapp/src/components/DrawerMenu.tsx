@@ -2,10 +2,14 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { lockScroll, unlockScroll } from "../lib/dom/scrollLock"; // adjust path if needed
+import LanguageMenu from "./LanguageMenu";
+import { useTranslation } from "react-i18next";
+
 
 type Props = { open: boolean; onClose: () => void };
 
 export default function DrawerMenu({ open, onClose }: Props) {
+  const { t } = useTranslation();
   // 1️⃣ existing effect for ESC
   React.useEffect(() => {
     const onEsc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -48,14 +52,18 @@ export default function DrawerMenu({ open, onClose }: Props) {
         <div style={{ padding: 16, borderBottom: "1px solid #eee", fontWeight: 700, fontSize: 18 }}>Menu</div>
 
         <nav style={{ padding: 8, display: "grid", gap: 4 }}>
-          <Item to="/">🏠 Home</Item>
-          <Item to="/universal">🌍 Universal Shop</Item>
-          <Item to="/shops?joined=1">🤝 Shops I Joined</Item>
-          <Item to="/shops?mine=1">🏪 My Shop(s)</Item>
-          <Item to="/orders">📦 My Orders</Item>
-          <Item to="/cart">🛒 Cart</Item>
-          <Item to="/profile">👤 Profile</Item>
-          <Item to="/settings">⚙️ Settings</Item>
+           <li style={{ marginTop: 8 }}>
+            <LanguageMenu />
+          </li>
+          <Item to="/">🏠 {t("nav_home")}</Item>
+          <Item to="/universal">🌍 {t("nav_universal")}</Item>
+          <Item to="/shops?joined=1">🤝 {t("nav_joined")}</Item>
+          <Item to="/shops?mine=1">🏪 {t("nav_myshops")}</Item>
+          <Item to="/orders">📦 {t("nav_orders")}</Item>
+          <Item to="/cart">🛒 {t("nav_cart")}</Item>
+          <Item to="/profile">👤 {t("nav_profile")}</Item>
+          <Item to="/settings">⚙️ {t("nav_settings")}</Item>
+         
         </nav>
 
         <div style={{ marginTop: "auto", padding: 12 }}>

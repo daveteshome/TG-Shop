@@ -4,10 +4,13 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api/index";
 import { getInitDataRaw } from "../lib/telegram";
 import { createTenantFull } from "../lib/api/index";
+import { useTranslation } from "react-i18next";
 
 type Tenant = { id: string; slug: string; name: string; publicPhone?: string | null };
 
 export default function ShopList() {
+  const { t } = useTranslation();
+
   const [loading, setLoading] = useState(true);
   const [owned, setOwned] = useState<Tenant[]>([]);
   const [err, setErr] = useState<string | null>(null);
@@ -134,7 +137,7 @@ export default function ShopList() {
     <div style={{ padding: 12, display: "grid", gap: 14 }}>
       {/* Header: 🏪 My Shops + (+) */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <h2 style={{ margin: 0 }}>🏪 My Shops</h2>
+        <h2 style={{ margin: 0 }}>🏪 {t("title_my_shops")}</h2>
         {hasShops && (
           <button
             onClick={() => {
