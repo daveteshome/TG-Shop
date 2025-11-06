@@ -136,6 +136,12 @@ i18n
           // list empty
           msg_no_products_yet: "No products yet.",
           msg_no_shop_selected: "No shop selected.",
+
+          // Categories page
+          title_categories: "Categories",
+          categories_no_children: "No subcategories",
+          msg_failed_to_load: "Failed to load",
+
         },
       },
       am: {
@@ -190,6 +196,11 @@ i18n
           images: "ምስሎች",
           images_selected: "{{count}} ምስል ተመርጧል",
           images_selected_plural: "{{count}} ምስሎች ተመርጠዋል",
+          // ምድቦች ገጽ
+          title_categories: "ምድቦች",
+          categories_no_children: "ንዑስ ምድብ የለም",
+          msg_failed_to_load: "መጫን አልተሳካም",
+
         },
       },
     },

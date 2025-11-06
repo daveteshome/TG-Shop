@@ -44,12 +44,12 @@ export function createApp() {
   app.use(cors({
     origin: [
       ENV.WEBAPP_URL,
-      'https://eec43707d9fe.ngrok-free.app', //front
+      'https://unhandled-serenity-unsyllogistically.ngrok-free.dev', //front
       'https://web.telegram.org',
       'https://oauth.telegram.org',
       /\.t\.me$/,
       /\.telegram\.org$/,
-      /\.ngrok-free\.app$/, // Allow all ngrok subdomains
+      /\.ngrok-free\.dev$/, // Allow all ngrok subdomains
       'http://localhost:3000' // For local development
     ],
     credentials: true,

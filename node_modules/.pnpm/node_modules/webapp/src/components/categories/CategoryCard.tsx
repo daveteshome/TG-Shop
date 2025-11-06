@@ -3,47 +3,129 @@ import React from "react";
 export type Category = {
   id: string;
   title: string;
-  iconUrl?: string | null; // optional
-  emoji?: string | null;   // optional
+  iconUrl?: string | null;
+  emoji?: string;
 };
 
-export function CategoryCard({
-  c,
-  active,
-  onClick,
-}: {
-  c: Category;
-  active: boolean;
-  onClick: (id: string) => void;
-}) {
+type Props = {
+  category: Category;
+  active?: boolean;
+  onClick?: () => void;
+};
+
+function formatTitleForTwoLines(raw: string): React.ReactNode {
+  if (!raw) return null;
+
+  // Prefer breaking at the first comma, otherwise at the first ampersand.
+  const commaIdx = raw.indexOf(",");
+  const ampIdx = raw.indexOf("&");
+
+  let first = raw;
+  let second = "";
+
+  if (commaIdx >= 0) {
+    first = raw.slice(0, commaIdx + 1).trim(); // keep comma on line 1
+    second = raw.slice(commaIdx + 1).trim();
+  } else if (ampIdx > 0) {
+    first = raw.slice(0, ampIdx + 1).trim(); // include &
+    second = raw.slice(ampIdx + 1).trim();
+  }
+
+  // If no natural break, let CSS clamp do the work.
+  if (!second) {
+    return (
+      <span
+        style={{
+          display: "-webkit-box",
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: "vertical",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          wordBreak: "break-word",
+          whiteSpace: "normal",
+        }}
+      >
+        {raw}
+      </span>
+    );
+  }
+
   return (
-    <button
-      onClick={() => onClick(c.id)}
+    <span
       style={{
-        ...styles.wrap,
-        outline: active ? "2px solid var(--tg-theme-button-color, #2481cc)" : "1px solid rgba(0,0,0,.08)",
-        background: "var(--tg-theme-bg-color, #fff)",
+        display: "-webkit-box",
+        WebkitLineClamp: 2,
+        WebkitBoxOrient: "vertical",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        wordBreak: "break-word",
+        whiteSpace: "normal",
       }}
     >
-      <div style={styles.iconTile}>
-        {c.iconUrl ? (
-          <img src={c.iconUrl} alt={c.title} style={styles.iconImg} />
-        ) : (
-          <span style={styles.iconEmoji}>{c.emoji || c.title.slice(0, 1).toUpperCase()}</span>
-        )}
-      </div>
-      <div style={styles.title} title={c.title}>{c.title}</div>
-    </button>
+      <span>{first}</span>
+      <br />
+      <span>{second}</span>
+    </span>
   );
 }
 
-const styles: Record<string, React.CSSProperties> = {
-  wrap: { display: "flex", flexDirection: "column", alignItems: "center", gap: 8, borderRadius: 16, padding: 10, cursor: "pointer" },
-  iconTile: { width: 72, height: 72, borderRadius: 16, background: "rgba(0,0,0,.04)", display: "grid", placeItems: "center", overflow: "hidden" },
-  iconImg: { width: "100%", height: "100%", objectFit: "cover" },
-  iconEmoji: { fontSize: 30, lineHeight: "1", color: "var(--tg-theme-text-color, #111)" },
-  title: {
-    width: 88, textAlign: "center", fontSize: 13, color: "var(--tg-theme-text-color, #111)",
-    display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden",
-  },
-};
+export function CategoryCard({ category, active, onClick }: Props) {
+  const [imgOk, setImgOk] = React.useState(true);
+
+  return (
+    <button
+      onClick={onClick}
+      type="button"
+      style={{
+        cursor: "pointer",
+        textAlign: "center",
+        borderRadius: 12,
+        padding: "12px 4px",
+        background: active
+          ? "rgba(0,0,0,0.05)"
+          : "var(--tg-theme-bg-color, #fff)",
+        boxShadow: active ? "0 0 0 2px #0088cc inset" : "none",
+        transition: "background 0.15s ease",
+        border: "none",
+        minWidth: 0, // prevent overflow in grid cell
+      }}
+    >
+      {category.iconUrl && imgOk ? (
+        <img
+          src={category.iconUrl}
+          alt={category.title}
+          onError={() => setImgOk(false)} // fall back to emoji if image fails
+          style={{
+            width: 36,
+            height: 36,
+            objectFit: "contain",
+            marginBottom: 6,
+            pointerEvents: "none",
+          }}
+        />
+      ) : (
+        <div
+          style={{
+            fontSize: 36,
+            lineHeight: "36px",
+            marginBottom: 6,
+            pointerEvents: "none",
+          }}
+        >
+          {category.emoji || "📦"}
+        </div>
+      )}
+
+      <div
+        style={{
+          fontSize: 12.5,
+          color: "var(--tg-theme-text-color, #111)",
+          padding: "0 2px",
+          minWidth: 0,
+        }}
+      >
+        {formatTitleForTwoLines(category.title)}
+      </div>
+    </button>
+  );
+}

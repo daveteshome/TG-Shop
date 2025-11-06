@@ -72,23 +72,82 @@ apps/
    ├─ tsconfig.node.json
    └─ vite.config.ts
 
+////
 
 How To run
+
+
+pnpm dev
+ngrok http 8080 
+node proxy.js
+
+
+pnpm add http-proxy -w // not allways needed
+
+
+////
+
+# 1) Replace with your NEW token after you revoke the old one
+$NEW_TOKEN = "354GhTyXWoMqBNPseqYGT9BSkZw_NWL1pc4U9HWNuFfXnqfv"
+
+$cfg = @"
+version: "2"
+authtoken: $NEW_TOKEN
+
+tunnels:
+  backend:
+    proto: http
+    addr: 4000
+    region: us
+  webapp:
+    proto: http
+    addr: 5173
+    region: eu
+"@
+
+$path = "$env:USERPROFILE\AppData\Local\ngrok\ngrok.yml"
+$cfg | Set-Content -Encoding UTF8 $path
+$env:NGROK_CONFIG = $path
+
+ngrok config check --config $env:NGROK_CONFIG
+ngrok start backend webapp --config $env:NGROK_CONFIG
+
+
+# Run just ONE tunnel (either port 4000 or 5173)
+$cfg = @"
+version: 3
+agent:
+  authtoken: 354GhTyXWoMqBNPseqYGT9BSkZw_NWL1pc4U9HWNuFfXnqfv
+
+tunnels:
+  main:
+    proto: http
+    addr: 80
+"@
+
+$cfg | Set-Content -Encoding UTF8 'C:\Users\davet\AppData\Local\ngrok\ngrok.yml'
+$env:NGROK_CONFIG = 'C:\Users\davet\AppData\Local\ngrok\ngrok.yml'
+ngrok start main --config $env:NGROK_CONFIG
+
 
 First run this
 # --- Write a clean v3 config to the path you want ---
 $cfg = @"
 version: 3
 agent:
-  authtoken: 31Se6p0GGBw7fuNqBdHVfrUvHzD_4bWdUQBXhiqeokL3d8WvV
+  authtoken: 354GhTyXWoMqBNPseqYGT9BSkZw_NWL1pc4U9HWNuFfXnqfv
 
 tunnels:
   backend:
     proto: http
     addr: 4000
+    basic_auth:
+      - "backend:password123"
   webapp:
     proto: http
     addr: 5173
+    basic_auth:
+      - "frontend:password123"
 "@
 
 $cfg | Set-Content -Encoding UTF8 'C:\Users\davet\AppData\Local\ngrok\ngrok.yml'
