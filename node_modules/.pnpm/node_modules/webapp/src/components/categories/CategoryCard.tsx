@@ -10,13 +10,11 @@ export type Category = {
 type Props = {
   category: Category;
   active?: boolean;
-  onClick?: () => void;
+  onClick?: () => void; // used on desktop via wrapper
 };
 
 function formatTitleForTwoLines(raw: string): React.ReactNode {
   if (!raw) return null;
-
-  // Prefer breaking at the first comma, otherwise at the first ampersand.
   const commaIdx = raw.indexOf(",");
   const ampIdx = raw.indexOf("&");
 
@@ -24,14 +22,13 @@ function formatTitleForTwoLines(raw: string): React.ReactNode {
   let second = "";
 
   if (commaIdx >= 0) {
-    first = raw.slice(0, commaIdx + 1).trim(); // keep comma on line 1
+    first = raw.slice(0, commaIdx + 1).trim();
     second = raw.slice(commaIdx + 1).trim();
   } else if (ampIdx > 0) {
-    first = raw.slice(0, ampIdx + 1).trim(); // include &
+    first = raw.slice(0, ampIdx + 1).trim();
     second = raw.slice(ampIdx + 1).trim();
   }
 
-  // If no natural break, let CSS clamp do the work.
   if (!second) {
     return (
       <span
@@ -69,38 +66,46 @@ function formatTitleForTwoLines(raw: string): React.ReactNode {
   );
 }
 
-export function CategoryCard({ category, active, onClick }: Props) {
+export function CategoryCard({ category, active }: Props) {
   const [imgOk, setImgOk] = React.useState(true);
 
   return (
-    <button
-      onClick={onClick}
-      type="button"
+    <div
+      // Button-like but avoid native focus/callout on mobile
+      role="button"
+      aria-pressed={active ? "true" : "false"}
+      tabIndex={-1}
       style={{
-        cursor: "pointer",
+        cursor: "grab",
         textAlign: "center",
         borderRadius: 12,
         padding: "12px 4px",
-        background: active
-          ? "rgba(0,0,0,0.05)"
-          : "var(--tg-theme-bg-color, #fff)",
+        background: active ? "rgba(0,0,0,0.05)" : "var(--tg-theme-bg-color, #fff)",
         boxShadow: active ? "0 0 0 2px #0088cc inset" : "none",
         transition: "background 0.15s ease",
         border: "none",
-        minWidth: 0, // prevent overflow in grid cell
+        minWidth: 0,
+        touchAction: "none", // let parent handle touch gestures
+        userSelect: "none",
+        WebkitUserSelect: "none",
+        WebkitTouchCallout: "none",
       }}
     >
       {category.iconUrl && imgOk ? (
         <img
           src={category.iconUrl}
           alt={category.title}
-          onError={() => setImgOk(false)} // fall back to emoji if image fails
+          draggable={false} // prevent image drag ghost
+          onError={() => setImgOk(false)}
           style={{
             width: 36,
             height: 36,
             objectFit: "contain",
             marginBottom: 6,
             pointerEvents: "none",
+            userSelect: "none",
+            WebkitUserSelect: "none",
+            WebkitTouchCallout: "none",
           }}
         />
       ) : (
@@ -126,6 +131,6 @@ export function CategoryCard({ category, active, onClick }: Props) {
       >
         {formatTitleForTwoLines(category.title)}
       </div>
-    </button>
+    </div>
   );
 }
