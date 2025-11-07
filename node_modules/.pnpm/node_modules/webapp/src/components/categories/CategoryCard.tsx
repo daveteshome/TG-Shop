@@ -5,6 +5,7 @@ export type Category = {
   title: string;
   iconUrl?: string | null;
   emoji?: string;
+  icon?: string; // ✅ accept DB 'icon' (emoji string) too
 };
 
 type Props = {
@@ -68,10 +69,10 @@ function formatTitleForTwoLines(raw: string): React.ReactNode {
 
 export function CategoryCard({ category, active }: Props) {
   const [imgOk, setImgOk] = React.useState(true);
+  const glyph = category.emoji ?? category.icon ?? "📦"; // ✅ prefer emoji, then icon, else fallback
 
   return (
     <div
-      // Button-like but avoid native focus/callout on mobile
       role="button"
       aria-pressed={active ? "true" : "false"}
       tabIndex={-1}
@@ -85,7 +86,7 @@ export function CategoryCard({ category, active }: Props) {
         transition: "background 0.15s ease",
         border: "none",
         minWidth: 0,
-        touchAction: "none", // let parent handle touch gestures
+        touchAction: "none",
         userSelect: "none",
         WebkitUserSelect: "none",
         WebkitTouchCallout: "none",
@@ -95,7 +96,7 @@ export function CategoryCard({ category, active }: Props) {
         <img
           src={category.iconUrl}
           alt={category.title}
-          draggable={false} // prevent image drag ghost
+          draggable={false}
           onError={() => setImgOk(false)}
           style={{
             width: 36,
@@ -117,7 +118,7 @@ export function CategoryCard({ category, active }: Props) {
             pointerEvents: "none",
           }}
         >
-          {category.emoji || "📦"}
+          {glyph}
         </div>
       )}
 

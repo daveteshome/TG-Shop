@@ -21,6 +21,10 @@ import { upsertImageFromBytes  } from "../lib/r2";  // 👈 this exists in your 
 //const upload = multer({ storage: multer.memoryStorage() });
 
 
+// ── ADD near other imports ─────────────────────────────────────────────────────
+import { listCategoriesWithCountsForShop } from "../services/catalog.service";
+
+
 import type { Request } from "express";
 import type { Tenant } from "@prisma/client";
 type ReqWithTenant = Request & { tenantId?: string; tenant?: Tenant };
@@ -510,7 +514,103 @@ api.get("/shop/:slug/categories", resolveTenant, async (req: any, res, next) => 
   }
 });
 
+// ── ADD this endpoint (tenant-scoped) ──────────────────────────────────────────
+api.get("/shop/:slug/categories/with-counts", resolveTenant, async (req: any, res, next) => {
+  try {
+    const tenantId = req.tenantId!;
+    const data = await listCategoriesWithCountsForShop(tenantId);
+    res.json({ items: data });
+  } catch (e) {
+    next(e);
+  }
+});
 
+// --- add this small helper near the top of routes.ts (or above the handler) ---
+async function getDescendantsIds(rootId: string): Promise<string[]> {
+  const seen = new Set<string>();
+  let frontier: string[] = [String(rootId)];
+
+  while (frontier.length) {
+    const rows = await db.category.findMany({
+      where: { parentId: { in: frontier } },
+      select: { id: true },
+    });
+    const kids = rows.map(r => String(r.id));
+
+    const fresh: string[] = [];
+    for (const id of kids) {
+      if (!seen.has(id)) {
+        seen.add(id);
+        fresh.push(id);
+      }
+    }
+    frontier = fresh;
+  }
+  return Array.from(seen); // descendants only (not including root)
+}
+
+// --- REPLACE your current /shop/:slug/products handler with this one ---
+api.get("/shop/:slug/products", resolveTenant, async (req: any, res, next) => {
+  try {
+    const tenantId = req.tenantId!;
+    const categoryId = (req.query.category as string | undefined) || undefined;
+
+    const where: any = { tenantId, active: true };
+
+    if (categoryId && categoryId !== "all") {
+      const descendants = await getDescendantsIds(categoryId);
+      where.categoryId = { in: [categoryId, ...descendants] };
+    }
+
+    const products = await db.product.findMany({
+      where,
+      orderBy: [{ createdAt: "desc" }],
+      include: {
+        images: {
+          orderBy: { position: "asc" },
+          take: 1,
+          select: {
+            url: true,                 // http(s) or tg:file_id (legacy)
+            imageId: true,             // for publicImageUrl()
+            image: { select: { mime: true } }, // to decide extension
+          },
+        },
+        tenant: { select: { id: true, slug: true, name: true, publicPhone: true } },
+      },
+    });
+
+    const items = products.map((p) => {
+      const first = p.images?.[0] || null;
+
+      // Build R2 URL first (same as detail/logo)
+      const r2Url = first?.imageId
+        ? publicImageUrl(first.imageId, extFromMime(first.image?.mime))
+        : null;
+
+      const legacyHttp = first?.url && /^https?:\/\//i.test(first.url) ? first.url : null;
+      const tgProxy =
+        first?.url && /^tg:file_id:/i.test(first.url) ? `/api/products/${p.id}/image` : null;
+
+      const photoUrl = r2Url ?? legacyHttp ?? tgProxy ?? null;
+
+      return {
+        id: p.id,
+        title: p.title,
+        description: p.description ?? null,
+        price: Number(p.price),
+        currency: p.currency,
+        stock: p.stock,
+        active: p.active,
+        categoryId: p.categoryId ?? null,
+        photoUrl,
+      };
+    });
+
+    res.json({ items, tenant: req.tenant });
+  } catch (e) {
+    next(e);
+  }
+});
 
 // GET single product with all images
 api.get("/shop/:slug/products/:id", resolveTenant, async (req: any, res, next) => {
@@ -564,7 +664,6 @@ api.get("/shop/:slug/products/:id", resolveTenant, async (req: any, res, next) =
     next(e);
   }
 });
-
 
 
 // UPDATE PRODUCT in a tenant
@@ -673,46 +772,6 @@ api.patch("/shop/:slug/products/:id", resolveTenant, async (req: any, res, next)
     next(e);
   }
 });
-
-
-
-
-// TENANT PRODUCTS by slug
-// TENANT PRODUCTS by slug
-api.get('/shop/:slug/products', resolveTenant, async (req: ReqWithTenant, res, next) => {
-  try {
-    const tenantId = req.tenantId!;
-
-    const products = await db.product.findMany({
-      where: { tenantId, active: true },
-      orderBy: [{ createdAt: 'desc' }],
-      include: {
-        images: { orderBy: { position: 'asc' }, take: 1, select: { tgFileId: true, imageId: true, url: true } },
-      },
-    });
-
-    const items = await Promise.all(
-      products.map(async (p) => {
-        const photo = await firstImageWebUrl(p.id);
-        return {
-          id: p.id,
-          title: p.title,
-          description: p.description ?? null,
-          price: Number(p.price),
-          currency: p.currency,
-          stock: p.stock,
-          active: p.active,
-          categoryId: p.categoryId ?? null,
-          photoUrl: photo,
-        };
-      })
-    );
-
-    res.json({ items, tenant: req.tenant });
-  } catch (e) { next(e); }
-});
-
-
 
 // CONTACT INTENT from universal
 api.post('/products/:productId/contact', async (req, res, next) => {
@@ -885,8 +944,11 @@ function devSend(res: any, status: number, msg: string) {
   return res.status(status).send(DEV ? msg : String(status));
 }
 
-api.get('/products', async (req, res) => {
-  const categoryId = String(req.query.category || 'all');
++api.get('/products', async (req, res) => {
+  // Accept both ?category= and ?categoryId= to be robust with older UI code
+  const categoryId = String(
+    (req.query.category ?? req.query.categoryId ?? 'all')
+  );
   const page = Number(req.query.page || 1);
   const perPage = Number(req.query.perPage || 12);
 

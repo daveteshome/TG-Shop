@@ -1,3 +1,4 @@
+// apps/webapp/src/routes/Shop.tsx
 import React, { useEffect, useState, useRef } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { api } from "../lib/api/index";
@@ -5,7 +6,78 @@ import { getInitDataRaw } from "../lib/telegram";
 import ShopProfileDrawer from "../components/shop/ShopProfileDrawer";
 import CategoryCascader from "../components/CategoryCascader";
 import { useTranslation } from "react-i18next";
+import ShopCategoryFilterGridIdentical from "../components/shop/ShopCategoryFilterGridIdentical";
 
+const API_BASE = import.meta.env.VITE_API_BASE || "";
+
+/* ---------------- URL helpers ---------------- */
+function ensureAbsolute(url: string): string {
+  if (!url) return url;
+  if (url.startsWith("http://") || url.startsWith("https://")) return url;
+  return API_BASE ? `${API_BASE}${url}` : url;
+}
+function forceHttpsIfNeeded(url: string): string {
+  if (!url) return url;
+  if (typeof window !== "undefined" && window.location.protocol === "https:" && url.startsWith("http://")) {
+    return url.replace(/^http:\/\//, "https://");
+  }
+  return url;
+}
+function normalizeUrl(url?: string | null): string | null {
+  if (!url) return null;
+  return forceHttpsIfNeeded(ensureAbsolute(url));
+}
+
+function absolutizeIfNeeded(u?: string | null): string | null {
+  if (!u) return null;
+  if (/^https?:\/\//i.test(u)) return u;   // absolute (R2 / http)
+  if (u.startsWith("/")) return `${API_BASE}${u}`; // backend-relative
+  return null;
+}
+
+function Thumb({
+  slug,               // kept for signature compatibility (unused now)
+  productId,         // kept for signature compatibility (unused now)
+  photoUrl,
+}: {
+  slug: string;
+  productId: string;
+  photoUrl?: string | null;
+}) {
+  const [broken, setBroken] = React.useState(false);
+  const src = !broken ? absolutizeIfNeeded(photoUrl) : null;
+  const size = 58;
+
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        borderRadius: 10,
+        background: "#ddd",         // ✅ clean gray block
+        overflow: "hidden",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+      }}
+    >
+      {src ? (
+        <img
+          src={src}
+          alt=""
+          referrerPolicy="no-referrer"
+          width={size}
+          height={size}
+          style={{ objectFit: "cover", width: "100%", height: "100%", display: "block" }}
+          onError={() => setBroken(true)}   // ✅ fallback to gray if it fails
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/* ---------------- Types ---------------- */
 type Product = {
   id: string;
   title: string;
@@ -52,6 +124,9 @@ export default function Shop() {
   const [createImages, setCreateImages] = useState<UiImageNew[]>([]);
   const createFileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // filter category
+  const [categoryId, setCategoryId] = useState<string | null>(null);
+
   // edit form
   const [showEdit, setShowEdit] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -82,21 +157,37 @@ export default function Shop() {
     }
   }
 
-  async function loadProducts(shopSlug: string) {
-    const res = await api<{ items: Product[]; tenant: { id: string; name: string } }>(
-      `/shop/${shopSlug}/products`
+  // fetch products (honor categoryId)
+  async function loadProducts(shopSlug: string, catId: string | null = null) {
+    const qs = catId ? `?category=${encodeURIComponent(catId)}` : "";
+    const res = await api<{ items: Product[]; tenant?: { id: string; name: string } }>(
+      `/shop/${shopSlug}/products${qs}`
     );
-    setProducts(res.items);
-    setTenant(prev => ({
-      id: res.tenant.id,
-      name: res.tenant.name,
-      logoWebUrl: prev?.logoWebUrl ?? null,
-    }));
+    setProducts(res.items || []);
 
-    // notify header context
+    if (res.tenant && res.tenant.id) {
+      setTenant((prev) => ({
+        id: res.tenant!.id,
+        name: res.tenant!.name,
+        logoWebUrl: prev?.logoWebUrl ?? null,
+      }));
+    } else {
+      try {
+        const tnt = await api<{ id: string; name: string; logoWebUrl?: string | null }>(`/shop/${shopSlug}`);
+        setTenant((prev) => ({
+          id: tnt.id,
+          name: tnt.name,
+          logoWebUrl: prev?.logoWebUrl ?? tnt.logoWebUrl ?? null,
+        }));
+      } catch {
+        /* ignore */
+      }
+    }
+
+    const nameForHeader = res.tenant?.name ?? tenant?.name ?? "";
     window.dispatchEvent(
       new CustomEvent("tgshop:set-shop-context", {
-        detail: { slug: shopSlug, name: res.tenant.name },
+        detail: { slug: shopSlug, name: nameForHeader },
       })
     );
   }
@@ -133,11 +224,14 @@ export default function Shop() {
 
   useEffect(() => {
     if (!slug) return;
-    loadProducts(slug);
-  }, [slug]);
+    loadProducts(slug, categoryId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slug, categoryId]);
 
   useEffect(() => {
-    function onOpenShopMenu() { setProfileOpen(true); }
+    function onOpenShopMenu() {
+      setProfileOpen(true);
+    }
     window.addEventListener("tgshop:open-shop-menu", onOpenShopMenu);
     return () => window.removeEventListener("tgshop:open-shop-menu", onOpenShopMenu);
   }, []);
@@ -147,29 +241,31 @@ export default function Shop() {
     (async () => {
       try {
         const tnt = await api<{ id: string; name: string; logoWebUrl?: string | null }>(`/shop/${slug}`);
-        setTenant(prev => ({
+        setTenant((prev) => ({
           ...prev,
           id: tnt.id,
           name: tnt.name,
-          logoWebUrl: (typeof tnt.logoWebUrl === "string" && tnt.logoWebUrl.length > 0)
-            ? tnt.logoWebUrl
-            : (prev?.logoWebUrl ?? null),
+          logoWebUrl:
+            typeof tnt.logoWebUrl === "string" && tnt.logoWebUrl.length > 0
+              ? tnt.logoWebUrl
+              : prev?.logoWebUrl ?? null,
         }));
 
-        window.dispatchEvent(new CustomEvent("tgshop:set-shop-context", {
-          detail: {
-            slug,
-            name: tnt.name,
-            ...(tnt.logoWebUrl ? { logoWebUrl: tnt.logoWebUrl } : {}),
-          },
-        }));
+        window.dispatchEvent(
+          new CustomEvent("tgshop:set-shop-context", {
+            detail: {
+              slug,
+              name: tnt.name,
+              ...(tnt.logoWebUrl ? { logoWebUrl: tnt.logoWebUrl } : {}),
+            },
+          })
+        );
       } catch {
         /* ignore */
       }
     })();
   }, [slug]);
 
-  // header "Add product" listener
   useEffect(() => {
     function onAddProduct() {
       guardLeave(() => {
@@ -182,6 +278,7 @@ export default function Shop() {
     }
     window.addEventListener("tgshop:add-product", onAddProduct);
     return () => window.removeEventListener("tgshop:add-product", onAddProduct);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formDirty]);
 
   // =============== CREATE ===============
@@ -235,7 +332,7 @@ export default function Shop() {
         }),
       });
 
-      await loadProducts(slug);
+      await loadProducts(slug, categoryId);
 
       // reset
       setPTitle("");
@@ -326,7 +423,7 @@ export default function Shop() {
         }),
       });
 
-      await loadProducts(slug);
+      await loadProducts(slug, categoryId);
 
       setShowEdit(false);
       setFormDirty(false);
@@ -410,9 +507,7 @@ export default function Shop() {
           </div>
 
           {/* Category (cascader, icons hidden in this context) */}
-          <CategoryCascader 
-            value={pCategory} 
-            onChange={(id) => { setPCategory(id); markDirty(); }} />
+          <CategoryCascader value={pCategory} onChange={(id) => { setPCategory(id); markDirty(); }} />
 
           <textarea
             value={pDesc}
@@ -536,6 +631,9 @@ export default function Shop() {
         </div>
       )}
 
+      {/* Category grid */}
+      <ShopCategoryFilterGridIdentical value={categoryId} onChange={setCategoryId} />
+
       {/* products list */}
       {products.length === 0 ? (
         <div
@@ -570,17 +668,9 @@ export default function Shop() {
                   cursor: "pointer",
                 }}
               >
-                <div
-                  style={{
-                    width: 58,
-                    height: 58,
-                    borderRadius: 10,
-                    background: "#ddd",
-                    backgroundImage: p.photoUrl ? `url(${p.photoUrl})` : undefined,
-                    backgroundSize: "cover",
-                    backgroundPosition: "center",
-                  }}
-                />
+                {/* 👇 robust thumbnail tries both /shop/:slug/... and /api/products/... */}
+                <Thumb slug={slug!} productId={p.id} photoUrl={p.photoUrl} />
+
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 600, fontSize: 14 }}>{p.title}</div>
                   <div style={{ fontSize: 13, opacity: 0.7 }}>

@@ -33,7 +33,7 @@ export default function Home() {
       <section style={card}>
         <h2 style={title}>🤝 Joined Shops</h2>
         <p style={subtitle}>View shops you’ve joined by invitation</p>
-        <button onClick={() => navigate("/shops")} style={btn}>
+        <button onClick={() => navigate("/joined")} style={btn}>
           View Joined Shops
         </button>
       </section>

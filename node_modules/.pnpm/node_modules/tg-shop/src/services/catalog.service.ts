@@ -1,6 +1,7 @@
-// apps/backend/src/services/catalog.service.ts
 import { db } from "../lib/db";
 import { getTenantId } from "./tenant.util";
+import { publicImageUrl } from "../lib/r2";
+
 
 // If you prefer, move to config/env
 const CDN = process.env.CDN_IMAGE_BASE!; // e.g. https://...workers.dev/img
@@ -36,13 +37,20 @@ function resolveImageForWeb(productId: string, ref?: string | null, version?: st
 /** ===== DTO mapping ===== */
 
 function toProductDTO(p: any): ProductDTO {
-  // Prefer R2/Cloudflare (Image) → fallback to legacy URL → null
-  const pf =
-    p.images?.[0]?.image
-      ? photoFromImage(p.images[0].image, 512)
-      : p.images?.[0]?.url
-        ? resolveImageForWeb(p.id, p.images[0].url)
-        : null;
+  const first = p.images?.[0] || null;
+
+    let pf: string | null = null;
+  // ✅ R2 (from bucketKeyBase)
+  if (first?.image?.bucketKeyBase && process.env.CDN_IMAGE_BASE) {
+    pf = `${process.env.CDN_IMAGE_BASE}/${first.image.bucketKeyBase}/orig?w=512&fmt=auto`;
+  } else if (first?.webUrl) {
+    pf = first.webUrl; // if your ProductImage has this field
+  } else if (first?.url) {
+    if (/^https?:\/\//i.test(first.url)) pf = first.url;
+    else if (/^tg:file_id:/i.test(first.url)) pf = `/api/products/${p.id}/image`;
+  } else {
+    pf = null;
+  }
 
   const dto: ProductDTO = {
     id: p.id,
@@ -51,7 +59,7 @@ function toProductDTO(p: any): ProductDTO {
     price: Number(p.price),
     currency: p.currency,
     stock: p.stock,
-    active: p.active, // keeping your existing `active` field usage
+    active: p.active,
     photoUrl: pf,
     categoryId: p.categoryId ?? null,
   };
@@ -70,7 +78,6 @@ function toProductDTO(p: any): ProductDTO {
 
 /** ===== Private helpers ===== */
 
-// Global categories (no tenant filter). Include `name` and map to UI shape later.
 async function listCategoriesRaw() {
   return db.category.findMany({
     where: { isActive: true },
@@ -79,6 +86,7 @@ async function listCategoriesRaw() {
       id: true,
       name: true,
       slug: true,
+      icon: true,
       parentId: true,
       level: true,
       position: true,
@@ -90,50 +98,41 @@ async function listCategoriesRaw() {
 /** ===== Service API ===== */
 
 export const CatalogService = {
-  /** Storefront: categories with virtual "All" first (local shop) */
   async listCategories() {
     const cats = await listCategoriesRaw();
-    // keep backward compatibility: expose `title` for consumers that expect it
-    return [{ id: "all", title: "All" }, ...cats.map((c) => ({ id: c.id, title: c.name }))];
+    return [{ id: "all", title: "All", icon: "🛒"}, ...cats.map((c) => ({ id: c.id, title: c.name, icon: c.icon || null, }))];
   },
 
   async listAllCategoriesForCascader() {
     const rows = await listCategoriesRaw();
-    // normalize keys expected by the webapp
-    return rows.map(r => ({
+    return rows.map((r) => ({
       id: r.id,
       name: r.name ?? "",
       slug: r.slug,
-      parentId: r.parentId,   // <-- critical for drilldown
+      parentId: r.parentId,
       level: r.level ?? 0,
+      icon: r.icon ?? null,
     }));
   },
 
-  /** Admin: list active categories without "All" */
   async listActiveCategories() {
     const rows = await listCategoriesRaw();
-    return rows.map(c => ({ id: c.id, title: c.name ?? "" }));
+    return rows.map((c) => ({ id: c.id, title: c.name ?? "" }));
   },
 
-  /**
-   * Admin/dev: create/find a category by **name** (GLOBAL).
-   * (Kept the function name for compatibility; behavior is now global.)
-   */
   async upsertCategoryByTitle(title: string) {
     const clean = title.trim();
-    const slug = clean
-      .toLowerCase()
-      .normalize("NFKD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 64) || "category";
+    const slug =
+      clean
+        .toLowerCase()
+        .normalize("NFKD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 64) || "category";
 
-    // global unique by slug now
     const existing = await db.category.findUnique({ where: { slug } });
-    if (existing) {
-      return { id: existing.id, title: existing.name };
-    }
+    if (existing) return { id: existing.id, title: existing.name };
 
     const created = await db.category.create({
       data: { slug, name: clean, isActive: true, level: 0, position: 0 },
@@ -143,11 +142,15 @@ export const CatalogService = {
     return { id: created.id, title: created.name };
   },
 
-  /** Storefront: paged products (optional category filter) for local/private shop */
+  /** ===== Product listing (paged) ===== */
   async listProductsByCategoryPaged(categoryId: string, page: number, perPage: number) {
     const tenantId = await getTenantId();
     const where: any = { tenantId, active: true };
-    if (categoryId && categoryId !== "all") where.categoryId = categoryId;
+
+    if (categoryId && categoryId !== "all") {
+      const descendants = await getDescendantCategoryIds(categoryId);
+      where.categoryId = { in: [categoryId, ...descendants] };
+    }
 
     const safePage = Math.max(1, Number(page || 1));
     const safePer = Math.max(1, Number(perPage || 12));
@@ -159,7 +162,11 @@ export const CatalogService = {
       skip: (safePage - 1) * safePer,
       take: safePer,
       include: {
-        images: { orderBy: { position: "asc" }, take: 1, include: { image: true } },
+        images: {
+          orderBy: { position: "asc" },
+          take: 1,
+          include: { image: true }, // ✅ include R2 image
+        },
       },
     });
 
@@ -172,30 +179,37 @@ export const CatalogService = {
     };
   },
 
-  /** Storefront/Admin: non-paged list (optional category filter) for local/private shop */
+  /** ===== Product listing (non-paged) ===== */
   async listProductsByCategory(categoryId: string) {
     const tenantId = await getTenantId();
     const where: any = { tenantId, active: true };
-    if (categoryId && categoryId !== "all") where.categoryId = categoryId;
+
+    if (categoryId && categoryId !== "all") {
+      const descendants = await getDescendantCategoryIds(categoryId);
+      where.categoryId = { in: [categoryId, ...descendants] };
+    }
 
     const items = await db.product.findMany({
       where,
       orderBy: [{ title: "asc" }],
-      include: { images: { orderBy: { position: "asc" }, take: 1, include: { image: true } } },
+      include: {
+        images: {
+          orderBy: { position: "asc" },
+          take: 1,
+          include: { image: true }, // ✅ include R2 image
+        },
+      },
     });
 
     return items.map(toProductDTO);
   },
 
-  /** ====== Universal Shop feed (global marketplace) ======
-   * Only shows products with publishToUniversal = true AND reviewStatus = 'approved'
-   * Optional search (q) and category filter.
-   */
+  /** ===== Universal Shop feed ===== */
   async listUniversalFeed(opts?: {
     q?: string;
     categoryId?: string;
     limit?: number;
-    cursor?: string; // id of last item for keyset pagination
+    cursor?: string;
   }) {
     const { q, categoryId, limit = 24, cursor } = opts || {};
 
@@ -224,7 +238,6 @@ export const CatalogService = {
     };
   },
 
-  /** ====== Log contact from universal (message/call) ====== */
   async logContactIntent(productId: string, buyerTgId: string, type: "message" | "call") {
     const p = await db.product.findUnique({
       where: { id: productId },
@@ -239,11 +252,8 @@ export const CatalogService = {
     return { ok: true };
   },
 
-  /** ====== Admin helpers (publish flags / moderation) ====== */
-
-  // Toggle publish flags for a product (local/universal)
   async setPublishFlags(productId: string, flags: { isPublished?: boolean; publishToUniversal?: boolean }) {
-    await getTenantId(); // keep guard pattern; route should also enforce ownership/admin
+    await getTenantId();
     return db.product.update({
       where: { id: productId },
       data: {
@@ -256,9 +266,7 @@ export const CatalogService = {
     });
   },
 
-  // Moderation: approve/reject a product for universal feed
   async reviewUniversalProduct(productId: string, status: "approved" | "rejected", reviewerId?: string) {
-    // Platform admin guard should be enforced in the route/service caller.
     return db.product.update({
       where: { id: productId },
       data: {
@@ -270,3 +278,87 @@ export const CatalogService = {
     });
   },
 };
+
+/** ===== Category counts ===== */
+
+export type CascaderNode = {
+  id: string;
+  name: string;
+  parentId: string | null;
+  level: number;
+};
+
+export type CategoryWithCounts = CascaderNode & {
+  countDirect: number;
+  countWithDesc: number;
+};
+
+export async function listCategoriesWithCountsForShop(
+  tenantId: string
+): Promise<CategoryWithCounts[]> {
+  const nodes: CascaderNode[] = await CatalogService.listAllCategoriesForCascader();
+
+  const counts = await db.product.groupBy({
+    by: ["categoryId"],
+    _count: { _all: true },
+    where: { tenantId, active: true },
+  });
+
+  const directCountMap = new Map<string, number>();
+  counts.forEach((c: any) => {
+    if (c.categoryId) directCountMap.set(String(c.categoryId), c._count._all);
+  });
+
+  const children = new Map<string | null, string[]>();
+  nodes.forEach((n) => {
+    const list = children.get(n.parentId) || [];
+    list.push(n.id);
+    children.set(n.parentId, list);
+  });
+
+  const out = new Map<string, CategoryWithCounts>();
+  nodes.forEach((n) => {
+    out.set(n.id, { ...n, countDirect: directCountMap.get(n.id) || 0, countWithDesc: 0 });
+  });
+
+  const memo = new Map<string, number>();
+  const dfs = (id: string): number => {
+    if (memo.has(id)) return memo.get(id)!;
+    const me = out.get(id)!;
+    const kids = children.get(id) || [];
+    let sum = me.countDirect;
+    for (const cid of kids) sum += dfs(cid);
+    memo.set(id, sum);
+    me.countWithDesc = sum;
+    return sum;
+  };
+
+  (children.get(null) || []).forEach((rootId) => dfs(rootId));
+
+  return Array.from(out.values());
+}
+
+/** Collect all descendant category ids */
+async function getDescendantCategoryIds(rootId: string): Promise<string[]> {
+  const seen = new Set<string>();
+  let frontier: string[] = [String(rootId)];
+
+  while (frontier.length > 0) {
+    const rows = await db.category.findMany({
+      where: { parentId: { in: frontier } },
+      select: { id: true },
+    });
+    const kids = rows.map((r) => String(r.id));
+
+    const fresh: string[] = [];
+    for (const id of kids) {
+      if (!seen.has(id)) {
+        seen.add(id);
+        fresh.push(id);
+      }
+    }
+    frontier = fresh;
+  }
+
+  return Array.from(seen);
+}

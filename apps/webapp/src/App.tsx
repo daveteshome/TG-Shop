@@ -19,6 +19,7 @@ import ShopInvitations from "./routes/ShopInvitations";
 import ShopOrders from "./routes/ShopOrders";
 import ShopAnalytics from "./routes/ShopAnalytics";
 import ShopTopProducts from "./routes/ShopTopProducts";
+import JoinedShops from "./routes/JoinedShops";
 
 import ErrorBoundary from "./components/common/ErrorBoundary";
 import HeaderBar from "./components/layout/HeaderBar";
@@ -329,6 +330,7 @@ export default function App() {
             <Route path="/categories" element={<Categories />} />
             <Route path="/products" element={<Products />} />
             <Route path="/profile" element={<Profile />} />
+             <Route path="/joined" element={<JoinedShops />} />
             {/* If you still use OrderDetail, add its route here */}
             {/* <Route path="/orders/:id" element={<OrderDetail />} /> */}
           </Routes>

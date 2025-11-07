@@ -10,18 +10,16 @@ type Props = {
 };
 
 export function CategoryGrid({ categories, activeId, onPick, onReorder }: Props) {
-  // ===== Desktop (HTML5 DnD) =====
   const dragIndex = React.useRef<number | null>(null);
   const didDrag = React.useRef(false);
 
   function handleDragStart(e: React.DragEvent, index: number) {
-    if (isTouchDevice()) return; // mobile uses custom drag
+    if (isTouchDevice()) return;
     dragIndex.current = index;
     didDrag.current = false;
     e.dataTransfer.effectAllowed = "move";
-    // Hide native ghost so it doesn't fight our UI
     const img = new Image();
-    img.src = "data:image/gif;base64,R0lGODlhAQABAAAAACw="; // 1x1 transparent
+    img.src = "data:image/gif;base64,R0lGODlhAQABAAAAACw=";
     e.dataTransfer.setDragImage(img, 0, 0);
     e.dataTransfer.setData("text/plain", String(categories[index].id));
   }
@@ -58,13 +56,11 @@ export function CategoryGrid({ categories, activeId, onPick, onReorder }: Props)
     onPick?.(id);
   }
 
-  // ===== Mobile (custom long-press drag with ghost & grid snapping) =====
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const longPressTimer = React.useRef<number | null>(null);
   const startPoint = React.useRef<{ x: number; y: number } | null>(null);
   const movedBeforeLongPress = React.useRef(false);
 
-  // Stable grid metrics
   const [metrics, setMetrics] = React.useState<{
     left: number;
     top: number;
@@ -87,8 +83,6 @@ export function CategoryGrid({ categories, activeId, onPick, onReorder }: Props)
       const styles = getComputedStyle(cont);
       const gapX = parseFloat(styles.columnGap || styles.gap || "0") || 0;
       const gapY = parseFloat(styles.rowGap || styles.gap || "0") || 0;
-
-      // We know we render 4 columns in CSS; keep that in metrics to compute snapping.
       const cols = 4;
 
       setMetrics({
@@ -106,12 +100,11 @@ export function CategoryGrid({ categories, activeId, onPick, onReorder }: Props)
     return () => window.removeEventListener("resize", measure);
   }, [categories.length]);
 
-  // Drag state
   const [touchDrag, setTouchDrag] = React.useState<{
     active: boolean;
     draggedId: string;
-    baseOrder: Category[]; // immutable snapshot at drag start
-    previewOrder: Category[]; // live preview order
+    baseOrder: Category[];
+    previewOrder: Category[];
     ghostX: number;
     ghostY: number;
     ghostW: number;
@@ -135,27 +128,17 @@ export function CategoryGrid({ categories, activeId, onPick, onReorder }: Props)
     return Math.max(min, Math.min(max, n));
   }
 
-  // Grid-snapped index from a pointer (x,y)
   function snappedIndexFromPoint(x: number, y: number, count: number): number {
     if (!metrics) return -1;
-    const {
-      left, top, cellW, cellH, gapX, gapY, cols,
-    } = metrics;
-
-    // local coords inside container
+    const { left, top, cellW, cellH, gapX, gapY, cols } = metrics;
     const lx = x - left;
     const ly = y - top;
-
-    // total pitch per col/row
     const pitchX = cellW + gapX;
     const pitchY = cellH + gapY;
-
     let col = Math.floor(lx / pitchX);
     let row = Math.floor(ly / pitchY);
-
     col = clamp(col, 0, cols - 1);
     if (row < 0) row = 0;
-
     const idx = row * cols + col;
     return clamp(idx, 0, count - 1);
   }
@@ -182,8 +165,8 @@ export function CategoryGrid({ categories, activeId, onPick, onReorder }: Props)
       setTouchDrag({
         active: true,
         draggedId,
-        baseOrder: categories,        // snapshot at start
-        previewOrder: categories,     // start same as base
+        baseOrder: categories,
+        previewOrder: categories,
         ghostX: t.clientX,
         ghostY: t.clientY,
         ghostW: rect.width,
@@ -200,7 +183,6 @@ export function CategoryGrid({ categories, activeId, onPick, onReorder }: Props)
     const x = t.clientX;
     const y = t.clientY;
 
-    // If not dragging yet, cancel long-press on movement
     if (!touchDrag?.active) {
       const sp = startPoint.current;
       if (sp) {
@@ -214,31 +196,21 @@ export function CategoryGrid({ categories, activeId, onPick, onReorder }: Props)
       return;
     }
 
-    // Dragging: prevent scroll and update ghost position
     e.preventDefault();
     setTouchDrag(prev => (prev ? { ...prev, ghostX: x, ghostY: y } : prev));
 
-    // Compute snapped target index against the 4-col grid
     const targetIdx = snappedIndexFromPoint(x, y, categories.length);
     if (targetIdx < 0) return;
 
-    // Build preview from BASE order every time: remove draggedId, insert at targetIdx
     setTouchDrag(prev => {
       if (!prev) return prev;
       const base = prev.baseOrder;
       const draggedId = prev.draggedId;
-
-      // Remove dragged from base
       const without = base.filter(c => c.id !== draggedId);
-
-      // Clamp target if needed (since array is now length-1)
       const clampedTarget = clamp(targetIdx, 0, without.length);
-
-      // Insert dragged back
       const draggedItem = base.find(c => c.id === draggedId)!;
       const preview = [...without];
       preview.splice(clampedTarget, 0, draggedItem);
-
       return { ...prev, previewOrder: preview };
     });
   }
@@ -248,20 +220,17 @@ export function CategoryGrid({ categories, activeId, onPick, onReorder }: Props)
     clearLongPressTimer();
 
     if (touchDrag?.active) {
-      // Finalize based on previewOrder
       const ids = touchDrag.previewOrder.map(c => c.id);
       setTouchDrag(null);
       onReorder?.(ids);
-      return; // do not treat as tap
+      return;
     }
 
-    // Treat as tap: open children on released position
     const t = e.changedTouches[0];
     const idx = indexFromPointNearest(t.clientX, t.clientY);
     if (idx >= 0) onPick?.(categories[idx].id);
   }
 
-  // Fallback nearest (used for tap hit testing only)
   function indexFromPointNearest(x: number, y: number): number {
     const cont = containerRef.current;
     if (!cont) return -1;
@@ -309,23 +278,19 @@ export function CategoryGrid({ categories, activeId, onPick, onReorder }: Props)
       {renderCats.map((c, i) => (
         <div
           key={c.id}
-          draggable={!isTouch} // desktop native DnD only
+          draggable={!isTouch}
           onDragStart={(e) => handleDragStart(e, i)}
           onDrop={(e) => handleDrop(e, i)}
-          onTouchStart={(e) => onTouchStart(e, i)} // mobile long-press
-          style={{
-            minWidth: 0,
-            visibility: hiddenId === c.id ? "hidden" : "visible",
-          }}
+          onTouchStart={(e) => onTouchStart(e, i)}
+          style={{ minWidth: 0, visibility: hiddenId === c.id ? "hidden" : "visible" }}
           onClick={() => {
-            if (!isTouch) handleClick(c.id); // desktop click
+            if (!isTouch) handleClick(c.id);
           }}
         >
           <CategoryCard category={c} active={activeId === c.id} />
         </div>
       ))}
 
-      {/* Floating ghost that follows your finger (mobile) */}
       {touchDrag?.active && (
         <div
           style={{
@@ -351,6 +316,7 @@ export function CategoryGrid({ categories, activeId, onPick, onReorder }: Props)
 }
 
 function GhostCard({ category }: { category: Category }) {
+  const glyph = category.emoji ?? category.icon ?? "📦"; // ✅ same fallback logic
   return (
     <div style={{ textAlign: "center", borderRadius: 12, padding: "12px 4px" }}>
       {category.iconUrl ? (
@@ -362,7 +328,7 @@ function GhostCard({ category }: { category: Category }) {
         />
       ) : (
         <div style={{ fontSize: 36, lineHeight: "36px", marginBottom: 6, pointerEvents: "none" }}>
-          {category.emoji || "📦"}
+          {glyph}
         </div>
       )}
       <div
