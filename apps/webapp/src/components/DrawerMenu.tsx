@@ -57,7 +57,7 @@ export default function DrawerMenu({ open, onClose }: Props) {
           </li>
           <Item to="/">🏠 {t("nav_home")}</Item>
           <Item to="/universal">🌍 {t("nav_universal")}</Item>
-          <Item to="/shops?joined=1">🤝 {t("nav_joined")}</Item>
+          <Item to="/joined">🤝 {t("nav_joined")}</Item>
           <Item to="/shops?mine=1">🏪 {t("nav_myshops")}</Item>
           <Item to="/orders">📦 {t("nav_orders")}</Item>
           <Item to="/cart">🛒 {t("nav_cart")}</Item>

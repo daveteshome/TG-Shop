@@ -221,18 +221,11 @@ export default function ProductDetail() {
         <button
           onClick={() =>
             guardLeave(() => {
-              const lastShop = localStorage.getItem("tgshop:lastShopPage");
-              if (window.history.length > 1) {
-                nav(-1);
-              } else if (lastShop) {
-                nav(lastShop, { replace: true });
-              } else if (slug) {
-                nav(`/shop/${slug}`, { replace: true });
-              } else {
-                nav("/", { replace: true });
-              }
+              const fallback = slug ? `/shop/${slug}` : "/";
+              nav(fallback, { replace: true });
             })
           }
+
           style={{ border: "1px solid #ddd", borderRadius: 999, width: 28, height: 28, background: "#fff" }}
           aria-label={t("aria_back")}
         >

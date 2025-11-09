@@ -1,6 +1,7 @@
-// src/App.tsx
+// apps/webapp/src/App.tsx
 import React, { useState, useMemo, useEffect } from "react";
 import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
+import { api } from "./lib/api/index";
 
 import Home from "./routes/Home";
 import Cart from "./routes/Cart";
@@ -28,6 +29,8 @@ import ShopProfileDrawer from "./components/shop/ShopProfileDrawer";
 
 import { ensureInitDataCached, ready } from "./lib/telegram";
 
+/* ====================== Styles ====================== */
+
 const appStyle: React.CSSProperties = {
   maxWidth: 860,
   margin: "0 auto",
@@ -39,6 +42,8 @@ const appStyle: React.CSSProperties = {
   minHeight: "100vh",
   boxSizing: "border-box",
 };
+
+/* ====================== Helpers ====================== */
 
 // Decide where "back" should go from the current path
 function getBackTarget(pathname: string): string | null {
@@ -56,12 +61,107 @@ function getBackTarget(pathname: string): string | null {
   return null;
 }
 
+
+function useSaveLastPage() {
+  const loc = useLocation();
+  useEffect(() => {
+    const path = loc.pathname || "/";
+    // OPTIONAL: if you want to ignore some paths, do it here:
+    // if (path.startsWith("/auth")) return;
+    localStorage.setItem("tgshop:lastShopPage", path);
+    localStorage.setItem("tgshop:lastShopPageAt", String(Date.now()));
+  }, [loc.pathname]);
+}
+
+/**
+ * Auto-join + resume behavior.
+ * - Reads join code from Telegram initData (start_param) OR from ?tgWebAppStartParam=join_xxx
+ * - Calls /invites/accept (idempotent) – expects { joined: boolean, tenant?: { slug?: string } }
+ * - On success navigates to /shop/:slug and stores it in tgshop:lastShopPage
+ * - If no join code or failure → resume last page (tgshop:lastShopPage) if present
+ */
+function useAutoJoinAndResume() {
+  const nav = useNavigate();
+  const hasRunRef = React.useRef(false);
+
+  useEffect(() => {
+    if (hasRunRef.current) return;         // ✅ run once per app load
+    hasRunRef.current = true;
+
+    const tg = (window as any).Telegram?.WebApp;
+    const startParamFromInit = tg?.initDataUnsafe?.start_param as string | undefined;
+    const usp = new URLSearchParams(window.location.search);
+    const startParamFromQuery = usp.get("tgWebAppStartParam") || undefined;
+    const startParam = (startParamFromInit || startParamFromQuery || "").trim();
+
+    const code = startParam.startsWith("join_") ? startParam.slice("join_".length).trim() : "";
+
+    const handledKey   = code ? `tgshop:join-handled:${code}` : "tgshop:join-handled";
+    const lastPageKey  = "tgshop:lastShopPage";
+    const lastPageAtKey= "tgshop:lastShopPageAt";
+    const resumeOnceKey= "tgshop:resume-once";
+    const RESUME_TTL_MS= 1000 * 60 * 60 * 12; // 12h
+
+    function tryResumePolitely() {
+      try {
+        if (sessionStorage.getItem(resumeOnceKey)) return; // once per session
+        const saved   = localStorage.getItem(lastPageKey);
+        const savedAt = Number(localStorage.getItem(lastPageAtKey) || "0");
+        if (!saved) return;
+        if ((Date.now() - savedAt) > RESUME_TTL_MS) return;
+        if (window.location.pathname !== "/" && window.location.pathname !== "") return; // only from root
+        sessionStorage.setItem(resumeOnceKey, "1");
+        nav(saved, { replace: true });
+      } catch {}
+    }
+
+    if (!code) {
+      tryResumePolitely();
+      return;
+    }
+
+    if (sessionStorage.getItem(handledKey)) return;
+
+    (async () => {
+      try {
+        const res = await api<any>("/invites/accept", {
+          method: "POST",
+          body: JSON.stringify({ code }),
+        });
+        const slug = res?.tenant?.slug ?? res?.slug ?? null;
+
+        if (slug) {
+          sessionStorage.setItem(handledKey, "1"); // only after success
+          const target = `/shop/${slug}`;
+          // Set a starting last page (will be overwritten by useSaveLastPage as user navigates)
+          localStorage.setItem(lastPageKey, target);
+          localStorage.setItem(lastPageAtKey, String(Date.now()));
+          if (window.location.pathname !== target) {
+            nav(target, { replace: true });
+          }
+        } else {
+          tryResumePolitely();
+        }
+      } catch {
+        tryResumePolitely();
+      }
+    })();
+  }, []); // ✅ empty deps
+}
+
+
+/* ====================== App ====================== */
+
 export default function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false); // NEW: global profile drawer
+  const [profileOpen, setProfileOpen] = useState(false); // Global profile drawer
   const [didRestore, setDidRestore] = useState(false);
   const loc = useLocation();
   const nav = useNavigate();
+
+  // 🔑 Auto-join + resume (runs once)
+  useAutoJoinAndResume();
+  useSaveLastPage();
 
   // Route helpers
   const isProductDetail = /^\/shop\/[^/]+\/p\/[^/]+$/.test(loc.pathname);
@@ -86,7 +186,6 @@ export default function App() {
     setProfileOpen(false);
   }, [loc.pathname]);
 
-
   // Listen for shop context updates (robust: won't erase logo if payload misses it)
   useEffect(() => {
     function onCtx(e: any) {
@@ -98,10 +197,9 @@ export default function App() {
         d.logoUrl ??
         null;
 
-      setShopCtx(prev => ({
+      setShopCtx((prev) => ({
         slug: d.slug ?? prev.slug ?? null,
         name: d.name ?? prev.name ?? null,
-        // only update if we actually got a new non-empty logo string
         logoWebUrl:
           typeof incomingLogo === "string" && incomingLogo.length > 0
             ? incomingLogo
@@ -123,9 +221,8 @@ export default function App() {
         null;
 
       if (typeof incomingLogo === "string" && incomingLogo.length > 0) {
-        setShopCtx(prev => ({ ...prev, logoWebUrl: incomingLogo }));
+        setShopCtx((prev) => ({ ...prev, logoWebUrl: incomingLogo }));
       }
-      // if no valid URL in the event, do nothing (don't wipe the current logo)
     }
     window.addEventListener("tgshop:update-logo", onLogo);
     return () => window.removeEventListener("tgshop:update-logo", onLogo);
@@ -140,14 +237,16 @@ export default function App() {
     return () => window.removeEventListener("tgshop:open-shop-menu", onOpenShopMenu);
   }, []);
 
-  // Restore last path once
+  // Restore last path once (but skip if a join was handled)
   useEffect(() => {
     const t = setTimeout(() => {
       try {
+        const handledJoin = sessionStorage.getItem("tgshop:join-handled") === "1";
         const saved = localStorage.getItem("tgshop:lastPath");
         const currentPath = window.location.pathname || "/";
         const hasStartParam = window.location.search.includes("tgWebAppStartParam=");
         if (
+          !handledJoin &&
           saved &&
           saved !== "/" &&
           currentPath === "/" &&
@@ -173,6 +272,15 @@ export default function App() {
     } catch {}
   }, [loc.pathname, didRestore]);
 
+  // Also persist last visited shop page for resume logic
+  useEffect(() => {
+    if (loc.pathname.startsWith("/shop/")) {
+      try {
+        localStorage.setItem("tgshop:lastShopPage", loc.pathname);
+      } catch {}
+    }
+  }, [loc.pathname]);
+
   // Compute human title for non-back states (kept for Home/fallbacks)
   const computedTitle = useMemo(() => {
     if (isShopRoot || isShopChild) return shopCtx.name || "Shop";
@@ -188,9 +296,8 @@ export default function App() {
   // True Back behavior for center area
   const backTarget = useMemo(() => getBackTarget(loc.pathname), [loc.pathname]);
   const headerTitle = backTarget ? "←" : computedTitle;
-  const onTitleClick = backTarget ? () => nav(backTarget) : undefined; // clickable only when back exists
+  const onTitleClick = backTarget ? () => nav(backTarget) : undefined;
 
-  // Default Cart click when no override
   const onCartClick = () => nav("/cart");
 
   // Reusable avatar button (uses shop logo/name)
@@ -278,8 +385,8 @@ export default function App() {
         <>
           <HeaderBar
             onOpenMenu={() => setDrawerOpen(true)}
-            title={headerTitle}            // ← shows "←" when a back target exists
-            onTitleClick={onTitleClick}     // ← acts as true Back (undefined on Home)
+            title={headerTitle}
+            onTitleClick={onTitleClick}
             onCartClick={onCartClick}
             rightOverride={
               loc.pathname === "/shops"
@@ -295,7 +402,7 @@ export default function App() {
             onClose={() => setDrawerOpen(false)}
           />
 
-          {/* NEW: Global Shop Profile Drawer (works on all /shop/* pages) */}
+          {/* Global Shop Profile Drawer (works on all /shop/* pages) */}
           <ShopProfileDrawer
             open={profileOpen}
             onClose={() => setProfileOpen(false)}
@@ -312,7 +419,7 @@ export default function App() {
       <main style={{ paddingTop: isProductDetail ? 0 : 8, paddingBottom: 70 }}>
         <ErrorBoundary>
           <Routes>
-            <Route path="/" element={<Home />} />
+            <Route path="/" element={<Universal  />} />
             <Route path="/universal" element={<Universal />} />
             <Route path="/shops" element={<ShopList />} />
             <Route path="/shop/:slug" element={<Shop />} />
@@ -330,8 +437,9 @@ export default function App() {
             <Route path="/categories" element={<Categories />} />
             <Route path="/products" element={<Products />} />
             <Route path="/profile" element={<Profile />} />
-             <Route path="/joined" element={<JoinedShops />} />
-            {/* If you still use OrderDetail, add its route here */}
+            <Route path="/joined" element={<JoinedShops />} />
+
+            {/* If you still use OrderDetail: */}
             {/* <Route path="/orders/:id" element={<OrderDetail />} /> */}
           </Routes>
         </ErrorBoundary>

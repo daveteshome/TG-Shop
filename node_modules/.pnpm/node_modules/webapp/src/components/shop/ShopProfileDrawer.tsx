@@ -2,11 +2,18 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
 import RightDrawer from "../common/RightDrawer";
+import { api } from "../../lib/api/index";
 
 type ShopProfileDrawerProps = {
   open: boolean;
   onClose: () => void;
-  tenant?: { name?: string | null; slug?: string | null; logoWebUrl?: string | null; publishUniversal?: boolean };
+  tenant?: {
+    id?: string | null;
+    name?: string | null;
+    slug?: string | null;
+    logoWebUrl?: string | null;
+    publishUniversal?: boolean;
+  };
 };
 
 const row: React.CSSProperties = {
@@ -29,36 +36,107 @@ const sectionTitle: React.CSSProperties = {
 export default function ShopProfileDrawer({ open, onClose, tenant }: ShopProfileDrawerProps) {
   const nav = useNavigate();
 
-  // ✅ Stable slug: prefer prop, fallback to URL
+  // ✅ Prefer prop.slug, fallback to URL
   const computedSlug =
-    tenant?.slug ??
-    (window.location.pathname.match(/^\/shop\/([^/]+)/)?.[1] ?? null);
+    tenant?.slug ?? (typeof window !== "undefined" ? (window.location.pathname.match(/^\/shop\/([^/]+)/)?.[1] ?? null) : null);
+
+  const [tenantId, setTenantId] = React.useState<string | null>(tenant?.id ?? null);
+  const [copyBusy, setCopyBusy] = React.useState(false);
+
+  // Load tenantId if missing (needed for invite creation)
+  React.useEffect(() => {
+    let mounted = true;
+    (async () => {
+      if (!open) return;
+      if (tenantId || !computedSlug) return;
+      try {
+        const t = await api<{ id: string; slug: string; name: string; logoWebUrl?: string | null }>(`/shop/${computedSlug}`);
+        if (mounted) setTenantId(t.id);
+      } catch {
+        // ignore; copy button will guard
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [open, computedSlug, tenantId]);
 
   const initial = (tenant?.name || computedSlug || "S").slice(0, 1).toUpperCase();
 
-  // ✅ Safe navigation: close first, and don't navigate if it's the same path
+  // ✅ Safe navigation helper
   const go = (path: string) => {
     onClose();
-    if (window.location.pathname !== path) {
+    if (typeof window !== "undefined" && window.location.pathname !== path) {
       nav(path);
     }
   };
 
+  // ✅ Create invite and copy/share Telegram startapp link
+  async function handleCopyInviteLink() {
+    if (!computedSlug) return onClose();
+    try {
+      setCopyBusy(true);
+
+      // Ensure we have tenantId
+      let id = tenantId;
+      if (!id) {
+        const t = await api<{ id: string }>(`/shop/${computedSlug}`);
+        id = t.id;
+        setTenantId(id);
+      }
+
+      // Create invite (default role: MEMBER/buyer)
+      const res = await api<{ invite: any; deepLink: string; deepLinkBot?: string }>(`/tenants/${id}/invites`, {
+        method: "POST",
+        body: JSON.stringify({ role: "MEMBER" }),
+      });
+
+      const deepLink = res.deepLink; // e.g. https://t.me/<BOT>?startapp=join_<code>
+
+      // Prefer native share if available, else copy to clipboard
+      if (navigator.share) {
+        try {
+          await navigator.share({ title: tenant?.name ?? "Join my shop", url: deepLink });
+        } catch {
+          // if user cancels share, fall back to copy (no alert needed)
+          await navigator.clipboard?.writeText(deepLink);
+          alert("Invite link copied!");
+        }
+      } else {
+        await navigator.clipboard?.writeText(deepLink);
+        alert("Invite link copied!");
+      }
+    } catch (e) {
+      alert("Failed to create invite link. Please try again.");
+    } finally {
+      setCopyBusy(false);
+    }
+  }
+
   return (
     <RightDrawer open={open} onClose={onClose} width="66vw" maxWidth={300}>
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, borderBottom: "1px solid rgba(0,0,0,.06)" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: 12,
+          borderBottom: "1px solid rgba(0,0,0,.06)",
+        }}
+      >
         <div
           style={{
             width: 40,
             height: 40,
             borderRadius: "999px",
-            backgroundColor: "#eee",               // avoid 'background' shorthand
+            backgroundColor: "#eee",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             overflow: "hidden",
             fontWeight: 700,
+            flexShrink: 0,
           }}
         >
           {tenant?.logoWebUrl ? (
@@ -71,35 +149,33 @@ export default function ShopProfileDrawer({ open, onClose, tenant }: ShopProfile
             initial
           )}
         </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 700 }}>{tenant?.name ?? computedSlug ?? "Shop"}</div>
-          <div style={{ fontSize: 12, opacity: .6 }}>
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {tenant?.name ?? computedSlug ?? "Shop"}
+          </div>
+          <div style={{ fontSize: 12, opacity: 0.6 }}>
             {tenant?.publishUniversal ? "Published to Universal" : "Private"}
           </div>
         </div>
+
+        {/* 🔗 Copy Telegram startapp invite */}
         <button
-          onClick={() => {
-            if (!computedSlug) return onClose();
-            const url = `${window.location.origin}/shop/${computedSlug}`;
-            if (navigator.share) {
-              navigator.share({ title: tenant?.name ?? "My Shop", url }).catch(() => {});
-            } else {
-              navigator.clipboard?.writeText(url);
-              alert("Shop link copied!");
-            }
-          }}
+          onClick={handleCopyInviteLink}
+          disabled={copyBusy || !computedSlug}
           style={{
             width: 32,
             height: 32,
             borderRadius: 8,
             border: "1px solid rgba(0,0,0,.08)",
             background: "#fff",
-            cursor: "pointer",
+            cursor: copyBusy ? "default" : "pointer",
             fontSize: 16,
           }}
-          aria-label="Share shop link"
+          aria-label="Copy invite link"
+          title="Copy invite link"
         >
-          🔗
+          {copyBusy ? "…" : "🔗"}
         </button>
       </div>
 
@@ -128,15 +204,17 @@ export default function ShopProfileDrawer({ open, onClose, tenant }: ShopProfile
       {/* Sections */}
       <div style={{ overflowY: "auto" }}>
         <div style={sectionTitle}>Manage</div>
+
         <div
           style={row}
           onClick={() => {
             if (!computedSlug) return onClose();
-            go(`/shop/${computedSlug}/settings`);     // ✅ safe nav, no duplicate
+            go(`/shop/${computedSlug}/settings`);
           }}
         >
           ⚙️ Shop settings
         </div>
+
         <div
           style={row}
           onClick={() => {
@@ -146,6 +224,7 @@ export default function ShopProfileDrawer({ open, onClose, tenant }: ShopProfile
         >
           🗂️ Categories
         </div>
+
         <div
           style={row}
           onClick={() => {
@@ -157,6 +236,7 @@ export default function ShopProfileDrawer({ open, onClose, tenant }: ShopProfile
         </div>
 
         <div style={sectionTitle}>Catalog & Sales</div>
+
         <div
           style={row}
           onClick={() => {
@@ -166,6 +246,7 @@ export default function ShopProfileDrawer({ open, onClose, tenant }: ShopProfile
         >
           📦 Products
         </div>
+
         <div
           style={row}
           onClick={() => {
@@ -177,6 +258,7 @@ export default function ShopProfileDrawer({ open, onClose, tenant }: ShopProfile
         </div>
 
         <div style={sectionTitle}>Analytics</div>
+
         <div
           style={row}
           onClick={() => {
@@ -186,6 +268,7 @@ export default function ShopProfileDrawer({ open, onClose, tenant }: ShopProfile
         >
           📈 Overview
         </div>
+
         <div
           style={row}
           onClick={() => {
@@ -197,11 +280,12 @@ export default function ShopProfileDrawer({ open, onClose, tenant }: ShopProfile
         </div>
 
         <div style={sectionTitle}>Publishing</div>
+
         <div
           style={row}
           onClick={() => {
             if (!computedSlug) return onClose();
-            go(`/shop/${computedSlug}/settings`); // toggle later in settings
+            go(`/shop/${computedSlug}/settings`); // later add toggle in settings
           }}
           title="Toggle will be implemented later in Settings"
         >

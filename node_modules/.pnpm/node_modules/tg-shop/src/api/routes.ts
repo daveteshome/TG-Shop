@@ -204,42 +204,132 @@ api.post(
   }
 );
 
+
+
 // Create invite (OWNER)
 api.post('/tenants/:tenantId/invites', async (req, res, next) => {
   try {
     const { tenantId } = req.params;
-    const { role, maxUses, expiresAt, actorId } = req.body;
-    const code = Math.random().toString(36).slice(2,10);
+    const { role = "MEMBER", maxUses = 0, expiresAt = null } = req.body || {};
+
+    const userId = (req as any).userId;
+    if (!userId) return res.status(401).json({ error: "unauthorized_no_user" });
+
+    const code = Math.random().toString(36).slice(2, 10);
+
+    // create invite (relation + createdBy non-null)
     const invite = await db.shopInvite.create({
-      data: { tenantId, role, maxUses, expiresAt: expiresAt ? new Date(expiresAt) : null, code, createdBy: actorId },
+      data: {
+        tenant: { connect: { id: tenantId } },
+        role,
+        maxUses: maxUses ? Number(maxUses) : null,
+        expiresAt: expiresAt ? new Date(expiresAt) : null,
+        code,
+        createdBy: String(userId),
+      },
+      include: { tenant: { select: { id: true, slug: true } } },
     });
-    res.json({ invite, deepLink: `https://t.me/${process.env.BOT_USERNAME}?start=join_${code}` });
-  } catch (e) { next(e); }
+
+    // Resolve bot username: prefer env, else getMe()
+    let botUsername = process.env.BOT_USERNAME;
+    if (!botUsername) {
+      try {
+        const me = await bot.telegram.getMe();
+        botUsername = me.username || "";
+      } catch {
+        /* ignore */
+      }
+    }
+    if (!botUsername) {
+      return res.status(500).json({ error: "bot_username_unavailable" });
+    }
+
+    const deepLink    = `https://t.me/${botUsername}?startapp=join_${invite.code}`;
+    const deepLinkBot = `https://t.me/${botUsername}?start=join_${invite.code}`;
+
+    res.json({
+      invite: {
+        id: invite.id,
+        code: invite.code,
+        role: invite.role,
+        maxUses: invite.maxUses,
+        expiresAt: invite.expiresAt,
+        tenantId: invite.tenant.id,
+        slug: invite.tenant.slug,
+        createdBy: invite.createdBy,
+      },
+      deepLink,
+      deepLinkBot,
+    });
+  } catch (e) {
+    next(e);
+  }
 });
 
-// Accept invite (bot callback)
-api.post('/invites/accept', async (req, res, next) => {
-  try {
-    const { code, userId } = req.body;
-    const inv = await db.shopInvite.findUnique({ where: { code } });
-    if (!inv) return res.status(404).json({ error: 'invalid invite' });
-    if (inv.expiresAt && inv.expiresAt < new Date()) return res.status(410).json({ error: 'expired' });
-    if (inv.maxUses && inv.usedCount >= inv.maxUses) return res.status(409).json({ error: 'max uses reached' });
 
-    await db.$transaction(async (tx) => {
-      await tx.membership.upsert({
-        where: { tenantId_userId: { tenantId: inv.tenantId, userId } },
-        create: { tenantId: inv.tenantId, userId, role: inv.role },
-        update: { role: inv.role },
+api.post("/invites/accept", async (req: any, res, next) => {
+  try {
+    const { code } = req.body ?? {};
+    const userId = req.userId ? String(req.userId) : null;
+    console.log("[INVITE] accept called (routes.ts):", { code, userId });
+
+    if (!code) return res.status(400).json({ ok: false, error: "code_required" });
+
+    const inv = await db.shopInvite.findUnique({
+      where: { code },
+      include: { tenant: { select: { id: true, slug: true, name: true } } },
+    });
+    if (!inv) return res.status(404).json({ ok: false, error: "invalid_invite" });
+
+    const isExpired = !!inv.expiresAt && inv.expiresAt < new Date();
+    if (isExpired) return res.status(410).json({ ok: false, error: "expired" });
+    const isMaxed = inv.maxUses !== null && inv.usedCount >= (inv.maxUses ?? 0);
+    if (isMaxed) return res.status(409).json({ ok: false, error: "max_uses" });
+
+    // ✅ Register user as member
+    let membershipEnsured = false;
+    if (userId) {
+      console.log("[INVITE] upserting membership:", { tenantId: inv.tenantId, userId });
+      try {
+        await db.membership.upsert({
+          where: { tenantId_userId: { tenantId: inv.tenantId, userId } },
+          update: { role: (inv as any).role ?? "MEMBER" },
+          create: { tenantId: inv.tenantId, userId, role: (inv as any).role ?? "MEMBER" },
+        });
+        membershipEnsured = true;
+      } catch (err) {
+        console.error("[INVITE] membership upsert failed:", err);
+      }
+    } else {
+      console.warn("[INVITE] no userId — telegramAuth not attached or not authenticated");
+    }
+
+    // Count uses only for non-public invites
+    if (!(inv.expiresAt == null && inv.maxUses == null)) {
+      await db.shopInvite.update({
+        where: { code },
+        data: { usedCount: (inv.usedCount ?? 0) + 1 },
       });
-      await tx.shopInvite.update({ where: { id: inv.id }, data: { usedCount: { increment: 1 } } });
-      await tx.membershipAudit.create({
-        data: { tenantId: inv.tenantId, actorId: userId, targetId: userId, action: 'JOIN_ACCEPT', toRole: inv.role },
-      });
+    }
+
+    console.log("[INVITE] accept success:", {
+      tenantId: inv.tenantId,
+      slug: inv.tenant.slug,
+      membershipEnsured,
     });
 
-    res.json({ ok: true, tenantId: inv.tenantId });
-  } catch (e) { next(e); }
+    return res.json({
+      ok: true,
+      status: "accepted",
+      tenantId: inv.tenantId,
+      slug: inv.tenant.slug,
+      tenant: { id: inv.tenantId, slug: inv.tenant.slug, name: inv.tenant.name },
+      membershipEnsured,
+    });
+  } catch (e) {
+    console.error("[INVITE] accept failed (routes.ts):", e);
+    next(e);
+  }
 });
 
 // List members

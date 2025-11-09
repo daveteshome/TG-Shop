@@ -1,10 +1,11 @@
+// apps/webapp/src/routes/ShopCategories.tsx
 import React from "react";
 import { useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { TopBar } from "../components/layout/TopBar";
-import { api } from "../lib/api/index";
 import { CategoryGrid } from "../components/categories/CategoryGrid";
 import type { Category as UiCategory } from "../components/categories/CategoryCard";
+import { api } from "../lib/api/index";
 
 /** Backend shapes */
 type RawCategory = {
@@ -13,8 +14,8 @@ type RawCategory = {
   slug?: string | null;
   parentId?: string | null;
   level?: number | null;
-  iconUrl?: string | null;
-  icon?: string | null;
+  iconUrl?: string | null;      // definite URL field
+  icon?: string | null;         // mixed: URL, emoji, or Lucide name
   imageUrl?: string | null;
   webUrl?: string | null;
   image?: { webUrl?: string | null } | null;
@@ -29,18 +30,15 @@ type Tree = {
   childrenByParent: Record<string, RawCategory[]>;
 };
 
-function buildTree(rows: RawCategory[]): Tree {
-  const parents = rows.filter((r) => !r.parentId || r.level === 0);
-  const childrenByParent: Record<string, RawCategory[]> = {};
-  for (const r of rows) {
-    if (r.parentId) {
-      if (!childrenByParent[r.parentId]) childrenByParent[r.parentId] = [];
-      childrenByParent[r.parentId].push(r);
-    }
-  }
-  return { parents, childrenByParent };
+/* ---------- helpers: URL / emoji / slug normalizer ---------- */
+function looksLikeUrl(v?: string | null) {
+  return !!v && /^https?:\/\//i.test(v);
 }
-
+function looksLikeSingleEmoji(v?: string | null) {
+  if (!v) return false;
+  // quick heuristic for single-emoji strings
+  return v.length <= 4 && /[\u231A-\uD83E\uDDFF]/.test(v);
+}
 function stripDiacritics(s: string): string {
   try {
     return s.normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
@@ -48,7 +46,6 @@ function stripDiacritics(s: string): string {
     return s;
   }
 }
-
 function normSlug(s?: string | null): string {
   if (!s) return "";
   let x = s;
@@ -167,10 +164,46 @@ export default function ShopCategories() {
   // Build UI parents and apply saved order
   let parents = tree.parents.map((p) => {
     const norm = p.slug ? normSlug(p.slug) : normSlug(p.name);
-    const iconUrl =
-      p.iconUrl ?? p.icon ?? p.imageUrl ?? p.webUrl ?? p.image?.webUrl ?? undefined;
-    const emoji = !iconUrl ? fallbackIcons[norm] : undefined;
-    return { id: p.id, title: titleFor(p), iconUrl, emoji } as UiCategory;
+
+    // ----- Robust icon inference -----
+    // 1) URLs from the explicit URL fields
+    let iconUrl: string | undefined =
+      (looksLikeUrl(p.iconUrl) ? p.iconUrl : undefined) ??
+      (looksLikeUrl(p.imageUrl) ? p.imageUrl : undefined) ??
+      (looksLikeUrl(p.webUrl) ? p.webUrl : undefined) ??
+      (looksLikeUrl(p.image?.webUrl) ? p.image?.webUrl! : undefined);
+
+    // 2) If p.icon is present, classify it: URL vs emoji vs icon name
+    if (!iconUrl && p.icon) {
+      if (looksLikeUrl(p.icon)) {
+        iconUrl = p.icon;
+      }
+    }
+
+    // 3) Emoji default (only when we don't have iconUrl)
+    let emoji: string | undefined;
+    if (!iconUrl) {
+      if (looksLikeSingleEmoji(p.icon)) {
+        emoji = p.icon!;
+      } else {
+        emoji = fallbackIcons[norm]; // may be undefined; that's fine
+      }
+    }
+
+    // 4) Optional Lucide icon name (used by CategoryCard if supported)
+    // Only set when not URL and not emoji.
+    let iconName: string | undefined;
+    if (!iconUrl && !emoji && p.icon && typeof p.icon === "string") {
+      iconName = p.icon; // e.g., "Utensils", "Home", "Package"
+    }
+
+    return {
+      id: p.id,
+      title: titleFor(p),
+      iconUrl,
+      emoji,
+      iconName,         // harmless if your CategoryCard ignores it
+    } as UiCategory;
   });
 
   if (parentOrder && parentOrder.length > 0) {
@@ -241,6 +274,19 @@ export default function ShopCategories() {
       )}
     </div>
   );
+}
+
+/* ---------- local helpers ---------- */
+function buildTree(rows: RawCategory[]): Tree {
+  const parents = rows.filter((r) => !r.parentId || r.level === 0);
+  const childrenByParent: Record<string, RawCategory[]> = {};
+  for (const r of rows) {
+    if (r.parentId) {
+      if (!childrenByParent[r.parentId]) childrenByParent[r.parentId] = [];
+      childrenByParent[r.parentId].push(r);
+    }
+  }
+  return { parents, childrenByParent };
 }
 
 function SavedToast({ label }: { label: string }) {

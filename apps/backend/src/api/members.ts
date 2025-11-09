@@ -22,34 +22,87 @@ router.post("/tenants/:tenantId/invites", async (req: any, res, next) => {
         createdBy: actorId
       },
     });
-    res.json({ invite, deepLink: `https://t.me/${process.env.BOT_USERNAME}?start=join_${code}` });
+   res.json({ invite, deepLink: `https://t.me/${process.env.BOT_USERNAME}?startapp=join_${code}` });
+
   } catch (e) { next(e); }
 });
 
-// POST /api/invites/accept { code }
-router.post("/invites/accept", async (req: any, res, next) => {
-  try {
-    const { code } = req.body ?? {};
-    const userId = req.userId!;
-    const inv = await db.shopInvite.findUnique({ where: { code } });
-    if (!inv) return res.status(404).json({ error: "invalid_invite" });
-    if (inv.expiresAt && inv.expiresAt < new Date()) return res.status(410).json({ error: "expired" });
-    if (inv.maxUses && inv.usedCount >= inv.maxUses) return res.status(409).json({ error: "max_uses" });
+// GET /api/me/shops — shops where current user is a member.
+// Never 401; if auth missing, returns empty array.
+// Adds verbose logs to see what's happening.
+// GET /api/me/shops — shops where current user is a member.
+// Never 401; if auth missing, returns empty array.
+// Adds verbose logs to see what's happening.
 
-    await db.$transaction(async (tx) => {
-      await tx.membership.upsert({
-        where: { tenantId_userId: { tenantId: inv.tenantId, userId } },
-        create: { tenantId: inv.tenantId, userId, role: inv.role },
-        update: { role: inv.role },
-      });
-      await tx.shopInvite.update({ where: { id: inv.id }, data: { usedCount: { increment: 1 } } });
-      await tx.membershipAudit.create({
-        data: { tenantId: inv.tenantId, actorId: userId, targetId: userId, action: 'JOIN_ACCEPT', toRole: inv.role },
-      });
-    });
-    res.json({ ok: true, tenantId: inv.tenantId });
-  } catch (e) { next(e); }
-});
+// // POST /api/invites/accept { code }
+// router.post("/invites/accept", async (req: any, res, next) => {
+//   try {
+//     const { code } = req.body ?? {};
+//     const userId = req.userId ? String(req.userId) : null;
+//     console.log("[INVITE] accept called:", { code, userId });
+
+//     if (!code) return res.status(400).json({ ok: false, error: "code_required" });
+
+//     const inv = await db.shopInvite.findUnique({
+//       where: { code },
+//       include: { tenant: { select: { id: true, slug: true, name: true } } },
+//     });
+
+//     if (!inv) {
+//       console.log("[INVITE] invalid code:", code);
+//       return res.status(404).json({ ok: false, error: "invalid_invite" });
+//     }
+
+//     const isExpired = !!inv.expiresAt && inv.expiresAt < new Date();
+//     const isMaxed   = inv.maxUses !== null && inv.usedCount >= (inv.maxUses ?? 0);
+//     if (isExpired) return res.status(410).json({ ok: false, error: "expired" });
+//     if (isMaxed)   return res.status(409).json({ ok: false, error: "max_uses" });
+
+//     let membershipEnsured = false;
+
+//     if (!userId) {
+//       console.warn("[INVITE] no userId from telegramAuth; membership NOT created");
+//     } else {
+//       // Your schema already uses `membership` (see your GET /tenants/:tenantId/members routes)
+//       // and has a unique `tenantId_userId`.
+//       console.log("[INVITE] upserting membership:", { tenantId: inv.tenantId, userId });
+//       await db.membership.upsert({
+//         where: { tenantId_userId: { tenantId: inv.tenantId, userId } },
+//         update: { role: (inv as any).role ?? "MEMBER" },
+//         create: { tenantId: inv.tenantId, userId, role: (inv as any).role ?? "MEMBER" },
+//       });
+//       membershipEnsured = true;
+//     }
+
+//     // Count uses only for non-public invites
+//     if (!(inv.expiresAt == null && inv.maxUses == null)) {
+//       await db.shopInvite.update({
+//         where: { code },
+//         data: { usedCount: (inv.usedCount ?? 0) + 1 },
+//       });
+//     }
+
+//     console.log("[INVITE] accept success:", {
+//       tenantId: inv.tenantId,
+//       slug: inv.tenant.slug,
+//       membershipEnsured,
+//     });
+
+//     return res.json({
+//       ok: true,
+//       status: "accepted",
+//       tenantId: inv.tenantId,
+//       slug: inv.tenant.slug,
+//       tenant: { id: inv.tenantId, slug: inv.tenant.slug, name: inv.tenant.name },
+//       membershipEnsured,
+//     });
+//   } catch (e) {
+//     console.error("[INVITE] accept failed:", e);
+//     next(e);
+//   }
+// });
+
+
 
 // GET /api/tenants/:tenantId/members
 router.get("/tenants/:tenantId/members", async (req, res, next) => {
