@@ -1,106 +1,144 @@
 import React from "react";
+import { useLocation, useNavigate, Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 
-type HeaderBarProps = {
-  title: string;
-  onOpenMenu?: () => void;
-  /** When provided, replaces the default right side (Cart) */
-  rightOverride?: React.ReactNode;
-  /** Makes the center title clickable */
-  onTitleClick?: () => void;
-  /** Default Cart click (used when rightOverride is NOT provided) */
-  onCartClick?: () => void;
+type Props = {
+  onOpenMenu?: () => void;        // kept for compatibility, not used here anymore
+  title?: string;                 // kept for compatibility (you pass it)
+  onTitleClick?: () => void;      // kept for compatibility (you pass it)
+  onCartClick?: () => void;       // kept for compatibility (you pass it)
+  rightOverride?: React.ReactNode;// you pass overrides for shop pages; we honor them
 };
 
 export default function HeaderBar({
   title,
-  onOpenMenu,
-  rightOverride,
   onTitleClick,
   onCartClick,
-}: HeaderBarProps) {
+  rightOverride,
+}: Props) {
+  const { t } = useTranslation();
+  const loc = useLocation();
+  const nav = useNavigate();
+
+  const path = loc.pathname;
+  const isUniversalHome = path === "/" || path === "/universal";
+  const isShopHome = /^\/shop\/[^/]+$/.test(path);
+  const isMyShopHome = path === "/shops" || path === "/my";
+  const isRootLike = isUniversalHome || isShopHome || isMyShopHome;
+
+  const inShop = path.startsWith("/shop/");
+  const slug = inShop ? path.split("/")[2] : null;
+
+  const showBack = !isRootLike;
+
   return (
     <header
       style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        padding: "8px 12px",
-        borderBottom: "1px solid rgba(0,0,0,.06)",
         position: "sticky",
         top: 0,
-        zIndex: 10,
-        background: "var(--tg-theme-bg-color, #fff)",
+        zIndex: 40,
+        background: "#fff",
+        borderBottom: "1px solid #eee",
       }}
     >
-      {/* Left: hamburger */}
-      <button
-        type="button"
-        aria-label="Menu"
-        onClick={onOpenMenu}
+      <div
         style={{
-          width: 34,
-          height: 34,
-          borderRadius: 8,
-          border: "1px solid rgba(0,0,0,.08)",
-          background: "#fff",
+          height: 56,
           display: "flex",
           alignItems: "center",
-          justifyContent: "center",
-          fontSize: 18,
-          cursor: "pointer",
+          gap: 8,
+          padding: "0 12px",
         }}
       >
-        ☰
-      </button>
-
-      {/* Center: title (button if clickable) */}
-      <div style={{ flex: 1, textAlign: "center" }}>
-        {onTitleClick ? (
+        {/* Back only on non-root pages */}
+        {showBack ? (
           <button
-            onClick={onTitleClick}
-            title={title}
-            aria-label={title}
-            style={{
-              fontWeight: 700,
-              fontSize: 18,
-              background: "transparent",
-              border: "none",
-              cursor: "pointer",
-              padding: 0,
-            }}
+            aria-label="Back"
+            onClick={() => nav(-1)}
+            style={iconBtn}
           >
-            {title}
+            ←
           </button>
         ) : (
-          <div style={{ fontWeight: 700, fontSize: 18 }}>{title}</div>
-        )}
-      </div>
-
-      {/* Right: override or default Cart */}
-      <div style={{ minWidth: 34, display: "flex", justifyContent: "flex-end" }}>
-        {rightOverride ?? (
+          // Keep your title click (acts as custom back in some screens)
           <button
-            type="button"
-            aria-label="Cart"
-            onClick={onCartClick}
-            title="Cart"
+            onClick={onTitleClick}
             style={{
-              width: 34,
-              height: 34,
-              borderRadius: 8,
-              border: "1px solid rgba(0,0,0,.08)",
-              background: "#fff",
+              ...iconBtn,
+              visibility: onTitleClick ? "visible" : "hidden",
+            }}
+            aria-label="Title action"
+          >
+            {title === "←" ? "←" : "·"}
+          </button>
+        )}
+
+        {/* Search pill */}
+        <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
+          <div
+            style={{
+              flex: 1,
               display: "flex",
               alignItems: "center",
-              justifyContent: "center",
-              fontSize: 16,
-              cursor: "pointer",
+              gap: 8,
+              padding: "10px 12px",
+              background: "#f5f7fb",
+              border: "1px solid #eef2f7",
+              borderRadius: 12,
             }}
+          >
+            <span style={{ opacity: 0.6 }}>🔎</span>
+            <input
+              placeholder={
+                isUniversalHome
+                  ? t("search_global_placeholder", "Search products or shops…")
+                  : inShop
+                  ? t("search_shop_placeholder", "Search in this shop…")
+                  : t("search_placeholder", "Search…")
+              }
+              style={{
+                border: "none",
+                outline: "none",
+                background: "transparent",
+                width: "100%",
+                fontSize: 14,
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Right side */}
+        {rightOverride ? (
+          rightOverride
+        ) : isUniversalHome ? (
+          // ♥ Favorites on Universal
+          <Link to="/favorites" aria-label="Favorites" style={iconBtn}>
+            ♥
+          </Link>
+        ) : inShop && slug ? (
+          // 🛒 Cart on shop pages
+          <button
+            aria-label="Cart"
+            onClick={onCartClick}
+            style={iconBtn}
           >
             🛒
           </button>
+        ) : (
+          <span style={{ ...iconBtn, visibility: "hidden" }} />
         )}
       </div>
     </header>
   );
 }
+
+const iconBtn: React.CSSProperties = {
+  height: 36,
+  width: 36,
+  borderRadius: 10,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  border: "1px solid #eef2f7",
+  background: "#fff",
+};

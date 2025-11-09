@@ -26,6 +26,7 @@ import ErrorBoundary from "./components/common/ErrorBoundary";
 import HeaderBar from "./components/layout/HeaderBar";
 import DrawerMenu from "./components/DrawerMenu";
 import ShopProfileDrawer from "./components/shop/ShopProfileDrawer";
+import FooterNav from "./components/layout/FooterNav";
 
 import { ensureInitDataCached, ready } from "./lib/telegram";
 
@@ -156,6 +157,7 @@ export default function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false); // Global profile drawer
   const [didRestore, setDidRestore] = useState(false);
+  const [menuOpen, setMenuOpen] = React.useState(false);
   const loc = useLocation();
   const nav = useNavigate();
 
@@ -378,13 +380,13 @@ export default function App() {
     </button>
   );
 
-  return (
+    return (
     <div style={appStyle}>
-      {/* hide global header + menu on product detail */}
+      {/* keep your conditional wrapper */}
       {!isProductDetail && (
         <>
           <HeaderBar
-            onOpenMenu={() => setDrawerOpen(true)}
+            onOpenMenu={() => setDrawerOpen(true)} // kept for compatibility, header won’t show hamburger
             title={headerTitle}
             onTitleClick={onTitleClick}
             onCartClick={onCartClick}
@@ -397,12 +399,8 @@ export default function App() {
             }
           />
 
-          <DrawerMenu
-            open={drawerOpen}
-            onClose={() => setDrawerOpen(false)}
-          />
+          <DrawerMenu open={drawerOpen} onClose={() => setDrawerOpen(false)} />
 
-          {/* Global Shop Profile Drawer (works on all /shop/* pages) */}
           <ShopProfileDrawer
             open={profileOpen}
             onClose={() => setProfileOpen(false)}
@@ -444,6 +442,10 @@ export default function App() {
           </Routes>
         </ErrorBoundary>
       </main>
+      {/* ✅ New: bottom nav controls the same DrawerMenu */}
+      {!isProductDetail && (
+        <FooterNav onOpenMenu={() => setDrawerOpen(true)} />
+      )}
     </div>
   );
 }
