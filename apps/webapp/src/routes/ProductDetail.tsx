@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { api } from "../lib/api/index";
-import { getInitDataRaw } from "../lib/telegram";
+import { getInitDataRaw, getTelegramWebApp } from "../lib/telegram";
 import CategoryCascader from "../components/CategoryCascader";
 import { useTranslation } from "react-i18next";
 
+/* ---------- Types ---------- */
 type Product = {
   id: string;
   title: string;
@@ -13,6 +14,15 @@ type Product = {
   currency: string;
   stock?: number | null;
   categoryId?: string | null;
+  photoUrl?: string | null;
+  images?: Array<{
+    id?: string;
+    imageId?: string | null;
+    webUrl?: string | null;
+    url?: string | null;
+    position?: number;
+  }>;
+  tenant?: { id?: string; slug?: string; name?: string; publicPhone?: string | null };
 };
 
 type ProductImage = {
@@ -23,26 +33,35 @@ type ProductImage = {
   position?: number;
 };
 
+/* ---------- Component ---------- */
 export default function ProductDetail() {
-  const { slug, id } = useParams<{ slug: string; id: string }>();
+  const { slug, id } = useParams<{ slug?: string; id: string }>();
   const nav = useNavigate();
+  const { pathname } = useLocation();
   const { t } = useTranslation();
 
+  /* Mode detection that works in TMA and web */
+  const cleanPath = pathname.replace(/^\/?tma\//, "").replace(/^\/+/, "");
+  const isOwner = cleanPath.startsWith("shop/");
+  const isBuyer = cleanPath.startsWith("s/");
+  const isUniversal = cleanPath.startsWith("universal/");
+  const mode: "owner" | "buyer" | "universal" =
+    isOwner ? "owner" : isBuyer ? "buyer" : "universal";
+
+  /* State */
   const [loading, setLoading] = useState(true);
   const [product, setProduct] = useState<Product | null>(null);
   const [images, setImages] = useState<ProductImage[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [idx, setIdx] = useState(0);
 
-  // edit UI
+  // edit UI (owner)
   const [editMode, setEditMode] = useState(false);
   const [title, setTitle] = useState("");
   const [price, setPrice] = useState("");
   const [currency, setCurrency] = useState("ETB");
   const [desc, setDesc] = useState("");
   const [stock, setStock] = useState("1");
-
-  // category
   const [category, setCategory] = useState<string | null>(null);
 
   const [editImgs, setEditImgs] = useState<
@@ -55,26 +74,37 @@ export default function ProductDetail() {
   const [saveErr, setSaveErr] = useState<string | null>(null);
 
   const [dirty, setDirty] = useState(false);
-  function markDirty() { setDirty(true); }
+  const markDirty = () => setDirty(true);
   function guardLeave(next: () => void) {
-    if (!dirty) { next(); return; }
+    if (!dirty) {
+      next();
+      return;
+    }
     const ok = window.confirm(t("confirm_discard_changes"));
-    if (ok) { setDirty(false); next(); }
+    if (ok) {
+      setDirty(false);
+      next();
+    }
   }
 
-  // load product
+  /* Load product */
   useEffect(() => {
-    if (!slug || !id) return;
+    if (!id) return;
     (async () => {
       setLoading(true);
       setErr(null);
       try {
-        const r = await api<{ product: Product; images: ProductImage[] }>(`/shop/${slug}/products/${id}`);
+        const endpoint =
+          mode === "owner" || mode === "buyer"
+            ? `/shop/${slug}/products/${id}`
+            : `/universal/products/${id}`;
+
+        const r = await api<{ product: Product; images: ProductImage[] }>(endpoint);
         setProduct(r.product);
         setImages(r.images || []);
         setIdx(0);
 
-        // prep edit
+        // prep edit defaults (owner)
         setTitle(r.product.title || "");
         setPrice(String(r.product.price ?? ""));
         setCurrency(r.product.currency || "ETB");
@@ -83,7 +113,7 @@ export default function ProductDetail() {
         setCategory(r.product.categoryId || null);
 
         setEditImgs(
-          (r.images || []).map((im) => ({
+          (r.images || []).map((im: ProductImage) => ({
             kind: "existing" as const,
             imageId: im.imageId || "",
             url: im.webUrl ?? im.url ?? null,
@@ -97,8 +127,9 @@ export default function ProductDetail() {
         setLoading(false);
       }
     })();
-  }, [slug, id, t]);
+  }, [slug, id, t, mode]);
 
+  /* Reorder helper */
   function moveImage<T>(list: T[], index: number, dir: -1 | 1): T[] {
     const newIndex = index + dir;
     if (newIndex < 0 || newIndex >= list.length) return list;
@@ -109,8 +140,9 @@ export default function ProductDetail() {
     return copy;
   }
 
+  /* Save (owner) */
   async function handleSaveEdit() {
-    if (!slug || !id) return;
+    if (mode !== "owner" || !slug || !id) return;
     setSaving(true);
     setSaveErr(null);
 
@@ -119,14 +151,12 @@ export default function ProductDetail() {
       setSaving(false);
       return;
     }
-
     const priceNum = Number(price);
     if (!price.trim() || Number.isNaN(priceNum) || priceNum <= 0) {
       setSaveErr(t("err_price_gt_zero"));
       setSaving(false);
       return;
     }
-
     const stockNum = Number(stock);
     if (!stock.trim() || Number.isNaN(stockNum) || stockNum <= 0 || !Number.isInteger(stockNum)) {
       setSaveErr(t("err_stock_integer_gt_zero"));
@@ -137,7 +167,7 @@ export default function ProductDetail() {
     try {
       const initData = getInitDataRaw();
 
-      // upload new
+      // upload newly added images
       const uploaded: Record<string, string> = {};
       for (const im of editImgs) {
         if (im.kind === "new") {
@@ -178,19 +208,20 @@ export default function ProductDetail() {
         }),
       });
 
-      // refresh view
+      // refresh view after save
       const r = await api<{ product: Product; images: ProductImage[] }>(`/shop/${slug}/products/${id}`);
       setProduct(r.product);
       setImages(r.images || []);
       setIdx(0);
       setEditImgs(
-        (r.images || []).map((im) => ({
+        (r.images || []).map((im: ProductImage) => ({
           kind: "existing" as const,
           imageId: im.imageId || "",
           url: im.webUrl ?? im.url ?? null,
         }))
       );
 
+      // ✅ critical: saved state, no prompt on back
       setDirty(false);
       setEditMode(false);
     } catch (e: any) {
@@ -200,12 +231,39 @@ export default function ProductDetail() {
     }
   }
 
+  /* Buyer / Universal actions (simple placeholders) */
+  const tg = getTelegramWebApp();
+  const callShop = () => {
+    if (!product?.tenant?.publicPhone) return;
+    window.location.href = `tel:${product.tenant.publicPhone}`;
+  };
+  const addToCart = () => {
+    // TODO: wire to your cart
+    nav("/cart");
+  };
+  const addToFavorite = () => {
+    // TODO: favorites
+  };
+  const messageShop = () => {
+    if (!product?.tenant?.id) return;
+    const BOT_USERNAME = import.meta.env.VITE_BOT_USERNAME as string;
+    const link = `https://t.me/${BOT_USERNAME}?start=product_${product.id}_${product.tenant.id}`;
+    if (tg) tg.openTelegramLink(link);
+    else window.open(link, "_blank");
+  };
+
+  /* View helpers */
   const hasImages = images && images.length > 0;
   const currentImg = hasImages ? images[idx] : null;
+  const imgFallback =
+    product?.images?.[0]?.webUrl ||
+    product?.images?.[0]?.url ||
+    product?.photoUrl ||
+    null;
 
   return (
     <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
-      {/* local sticky header */}
+      {/* Sticky header */}
       <div
         style={{
           position: "sticky",
@@ -221,16 +279,23 @@ export default function ProductDetail() {
         <button
           onClick={() =>
             guardLeave(() => {
-              const fallback = slug ? `/shop/${slug}` : "/";
+              const fallback =
+                mode === "buyer"
+                  ? slug
+                    ? `/s/${slug}`
+                    : "/joined"
+                  : slug
+                  ? `/shop/${slug}`
+                  : "/";
               nav(fallback, { replace: true });
             })
           }
-
           style={{ border: "1px solid #ddd", borderRadius: 999, width: 28, height: 28, background: "#fff" }}
           aria-label={t("aria_back")}
         >
           ←
         </button>
+
         <h2
           style={{
             margin: 0,
@@ -244,11 +309,27 @@ export default function ProductDetail() {
         >
           {product ? product.title : t("title_product")}
         </h2>
-        <button onClick={() => guardLeave(() => setEditMode((v) => !v))} style={smallBtn}>
-          {editMode ? t("btn_close") : t("btn_edit")}
-        </button>
+
+        {mode === "owner" && (
+          <button
+            onClick={() => {
+              if (!editMode) {
+                // opening edit: start clean (no prompt on immediate back)
+                setEditMode(true);
+                setDirty(false);
+              } else {
+                // closing edit: respect unsaved changes
+                guardLeave(() => setEditMode(false));
+              }
+            }}
+            style={smallBtn}
+          >
+            {editMode ? t("btn_close") : t("btn_edit")}
+          </button>
+        )}
       </div>
 
+      {/* Body */}
       {loading ? (
         <div>{t("msg_loading")}</div>
       ) : err ? (
@@ -257,7 +338,7 @@ export default function ProductDetail() {
         <div>{t("msg_not_found")}</div>
       ) : (
         <>
-          {/* gallery */}
+          {/* Gallery */}
           <div style={{ position: "relative" }}>
             <div
               style={{
@@ -265,7 +346,11 @@ export default function ProductDetail() {
                 height: 210,
                 borderRadius: 12,
                 background: "#eee",
-                backgroundImage: currentImg?.webUrl ? `url(${currentImg.webUrl})` : undefined,
+                backgroundImage: currentImg?.webUrl
+                  ? `url(${currentImg.webUrl})`
+                  : imgFallback
+                  ? `url(${imgFallback})`
+                  : undefined,
                 backgroundSize: "cover",
                 backgroundPosition: "center",
               }}
@@ -289,7 +374,7 @@ export default function ProductDetail() {
               </>
             ) : null}
 
-            {/* centered thumbs */}
+            {/* thumbs */}
             {hasImages ? (
               <div style={{ display: "flex", justifyContent: "center", gap: 6, marginTop: 10 }}>
                 {images.map((im, i) => (
@@ -314,22 +399,8 @@ export default function ProductDetail() {
             ) : null}
           </div>
 
-          {/* view / edit block */}
-          {!editMode ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <div style={{ fontWeight: 600, fontSize: 16 }}>
-                {product.price} {product.currency}
-              </div>
-              <div style={{ fontSize: 13, opacity: 0.6 }}>
-                {t("label_stock_short")}: {product.stock ?? 0}
-              </div>
-              {product.description ? (
-                <div style={{ fontSize: 13, lineHeight: 1.5 }}>{product.description}</div>
-              ) : (
-                <div style={{ fontSize: 12, opacity: 0.5 }}>{t("msg_no_description")}</div>
-              )}
-            </div>
-          ) : (
+          {/* Owner edit vs read-only */}
+          {mode === "owner" && editMode ? (
             <div
               style={{
                 border: "1px solid rgba(0,0,0,.05)",
@@ -381,8 +452,14 @@ export default function ProductDetail() {
                 </select>
               </div>
 
-              {/* Category (icons hidden in this context) */}
-              <CategoryCascader value={category} onChange={(id) => { setCategory(id); markDirty(); }} />
+              {/* Category */}
+              <CategoryCascader
+                value={category}
+                onChange={(id) => {
+                  setCategory(id);
+                  markDirty();
+                }}
+              />
 
               <textarea
                 value={desc}
@@ -539,6 +616,54 @@ export default function ProductDetail() {
                 </button>
               </div>
             </div>
+          ) : (
+            <>
+              {/* view mode (all) */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <div style={{ fontWeight: 600, fontSize: 16 }}>
+                  {product.price} {product.currency}
+                </div>
+                <div style={{ fontSize: 13, opacity: 0.6 }}>
+                  {t("label_stock_short")}: {product.stock ?? 0}
+                </div>
+                {product.description ? (
+                  <div style={{ fontSize: 13, lineHeight: 1.5 }}>{product.description}</div>
+                ) : (
+                  <div style={{ fontSize: 12, opacity: 0.5 }}>{t("msg_no_description")}</div>
+                )}
+              </div>
+
+              {/* Buyer actions */}
+              {mode === "buyer" && (
+                <div style={{ marginTop: 16 }}>
+                  <button style={btn} onClick={addToCart}>
+                    {t("btn_add_to_cart") || "Add to Cart"}
+                  </button>
+                  {product?.tenant?.publicPhone && (
+                    <button style={{ ...smallBtn, width: "100%", marginTop: 6 }} onClick={callShop}>
+                      {t("btn_call_shop") || "Call"}
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Universal actions */}
+              {isUniversal && (
+                <div style={{ marginTop: 16, display: "flex", gap: 8 }}>
+                  <button style={{ ...smallBtn, flex: 1 }} onClick={addToFavorite}>
+                    ♥ {t("btn_favorite") || "Favorite"}
+                  </button>
+                  <button style={{ ...btn, flex: 1 }} onClick={messageShop}>
+                    {t("btn_message") || "Message"}
+                  </button>
+                  {product?.tenant?.publicPhone && (
+                    <button style={{ ...smallBtn, flex: 1 }} onClick={callShop}>
+                      {t("btn_call") || "Call"}
+                    </button>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </>
       )}
@@ -546,6 +671,7 @@ export default function ProductDetail() {
   );
 }
 
+/* ---------- Styles ---------- */
 const smallBtn: React.CSSProperties = {
   border: "1px solid rgba(0,0,0,.1)",
   background: "#fff",

@@ -1034,30 +1034,30 @@ function devSend(res: any, status: number, msg: string) {
   return res.status(status).send(DEV ? msg : String(status));
 }
 
-+api.get('/products', async (req, res) => {
-  // Accept both ?category= and ?categoryId= to be robust with older UI code
-  const categoryId = String(
-    (req.query.category ?? req.query.categoryId ?? 'all')
-  );
-  const page = Number(req.query.page || 1);
-  const perPage = Number(req.query.perPage || 12);
+// +api.get('/products', async (req, res) => {
+//   // Accept both ?category= and ?categoryId= to be robust with older UI code
+//   const categoryId = String(
+//     (req.query.category ?? req.query.categoryId ?? 'all')
+//   );
+//   const page = Number(req.query.page || 1);
+//   const perPage = Number(req.query.perPage || 12);
 
-  const data = await CatalogService.listProductsByCategoryPaged(categoryId, page, perPage);
+//   const data = await CatalogService.listProductsByCategoryPaged(categoryId, page, perPage);
 
-  // Force-correct photoUrl for every item using the resolver
-  const items = await Promise.all(
-    data.items.map(async (it: any) => {
-      const photo = await firstImageWebUrl(it.id);             // ← prefers R2, then TG proxy, then legacy
-      const apiImage = `/api/products/${it.id}/image`;         // ← backend proxy (good universal fallback)
-      const normalized = { ...it, photoUrl: photo, apiImage };
-      return normalized;
-    })
-  );
+//   // Force-correct photoUrl for every item using the resolver
+//   const items = await Promise.all(
+//     data.items.map(async (it: any) => {
+//       const photo = await firstImageWebUrl(it.id);             // ← prefers R2, then TG proxy, then legacy
+//       const apiImage = `/api/products/${it.id}/image`;         // ← backend proxy (good universal fallback)
+//       const normalized = { ...it, photoUrl: photo, apiImage };
+//       return normalized;
+//     })
+//   );
 
-  const result = { ...data, items };
+//   const result = { ...data, items };
 
-  res.json(result);
-});
+//   res.json(result);
+// });
 
 api.get("/products/:id/image", async (req, res) => {
   const id = req.params.id;

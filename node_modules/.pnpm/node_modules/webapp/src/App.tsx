@@ -21,6 +21,7 @@ import ShopOrders from "./routes/ShopOrders";
 import ShopAnalytics from "./routes/ShopAnalytics";
 import ShopTopProducts from "./routes/ShopTopProducts";
 import JoinedShops from "./routes/JoinedShops";
+import ShopBuyer from "./routes/ShopBuyer";
 
 import ErrorBoundary from "./components/common/ErrorBoundary";
 import HeaderBar from "./components/layout/HeaderBar";
@@ -47,18 +48,36 @@ const appStyle: React.CSSProperties = {
 /* ====================== Helpers ====================== */
 
 // Decide where "back" should go from the current path
-function getBackTarget(pathname: string): string | null {
-  if (pathname === "/") return null;                  // Home: no back
-  if (pathname === "/shops") return "/";              // Shops → Home
+// number means use history steps (e.g., -1), string means a concrete path
+function getBackTarget(pathname: string): string | number | null {
+  if (pathname === "/") return null;
+  if (pathname === "/shops") return "/";
 
-  const shopMatch = pathname.match(/^\/shop\/([^/]+)(?:\/.*)?$/);
-  if (shopMatch) {
-    const slug = shopMatch[1];
-    const isRoot = pathname === `/shop/${slug}` || pathname === `/shop/${slug}/`;
-    return isRoot ? "/shops" : `/shop/${slug}`;       // Shop root → Shops, subpage → Shop root
+  // ----- product detail (owner or buyer) -> always step back -----
+  if (/^(?:\/shop|\/s)\/[^/]+\/p\/[^/]+$/.test(pathname)) {
+    return -1; // exact previous page (keeps subcategory/filter/scroll)
   }
 
-  // Focus for this phase is My Shops & Shop routes; no back elsewhere
+  // ----- OWNER side -----
+  const owner = pathname.match(/^\/shop\/([^/]+)(?:\/.*)?$/);
+  if (owner) {
+    const slug = owner[1];
+    const isRoot = pathname === `/shop/${slug}` || pathname === `/shop/${slug}/`;
+    if (isRoot) return "/shops";
+    // any other owner child (e.g., /settings, /categories, /orders) → step back
+    return -1;
+  }
+
+  // ----- BUYER side -----
+  const buyer = pathname.match(/^\/s\/([^/]+)(?:\/.*)?$/);
+  if (buyer) {
+    const slug = buyer[1];
+    const isRoot = pathname === `/s/${slug}` || pathname === `/s/${slug}/`;
+    if (isRoot) return "/joined";
+    // any other buyer child (e.g., /orders) → step back
+    return -1;
+  }
+
   return null;
 }
 
@@ -161,13 +180,17 @@ export default function App() {
   const loc = useLocation();
   const nav = useNavigate();
 
+    // True Back behavior for center area
+
+
   // 🔑 Auto-join + resume (runs once)
   useAutoJoinAndResume();
   useSaveLastPage();
 
   // Route helpers
-  const isProductDetail = /^\/shop\/[^/]+\/p\/[^/]+$/.test(loc.pathname);
-  const isShopRoot = /^\/shop\/[^/]+$/.test(loc.pathname);
+  const isProductDetail =
+  /^(?:\/shop|\/s)\/[^/]+\/p\/[^/]+$/.test(loc.pathname) ||
+  /^\/universal\/p\/[^/]+$/.test(loc.pathname);const isShopRoot = /^\/shop\/[^/]+$/.test(loc.pathname);
   const isShopChild = /^\/shop\/[^/]+\/.+$/.test(loc.pathname);
 
   // Shop header context (filled by Shop/ShopSettings via window event)
@@ -295,10 +318,35 @@ export default function App() {
     return "TG Shop";
   }, [loc.pathname, isShopRoot, isShopChild, shopCtx.name]);
 
-  // True Back behavior for center area
   const backTarget = useMemo(() => getBackTarget(loc.pathname), [loc.pathname]);
   const headerTitle = backTarget ? "←" : computedTitle;
-  const onTitleClick = backTarget ? () => nav(backTarget) : undefined;
+
+const onTitleClick =
+  backTarget != null
+    ? () => {
+        if (typeof backTarget === "number") {
+          // If history is too shallow (e.g., direct link), fall back smartly
+          const isBuyer = /^\/s\//.test(loc.pathname);
+          const isOwner = /^\/shop\//.test(loc.pathname);
+
+          if (window.history.length > 1) {
+            nav(backTarget as number);
+          } else if (isBuyer) {
+            // fallback when landing directly on buyer detail
+            const m = loc.pathname.match(/^\/s\/([^/]+)/);
+            nav(m ? `/s/${m[1]}` : "/joined", { replace: true });
+          } else if (isOwner) {
+            const m = loc.pathname.match(/^\/shop\/([^/]+)/);
+            nav(m ? `/shop/${m[1]}` : "/shops", { replace: true });
+          } else {
+            nav("/", { replace: true });
+          }
+        } else {
+          nav(backTarget as string);
+        }
+      }
+    : undefined;
+
 
   const onCartClick = () => nav("/cart");
 
@@ -419,6 +467,8 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Universal  />} />
             <Route path="/universal" element={<Universal />} />
+            <Route path="/universal/p/:id" element={<ProductDetail />} />
+
             <Route path="/shops" element={<ShopList />} />
             <Route path="/shop/:slug" element={<Shop />} />
             <Route path="/shop/:slug/p/:id" element={<ProductDetail />} />
@@ -436,6 +486,10 @@ export default function App() {
             <Route path="/products" element={<Products />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/joined" element={<JoinedShops />} />
+
+            <Route path="/s/:slug" element={<ShopBuyer />} />
+            <Route path="/s/:slug/p/:id" element={<ProductDetail />} />
+            <Route path="/s/:slug/orders" element={<ShopOrders />} />
 
             {/* If you still use OrderDetail: */}
             {/* <Route path="/orders/:id" element={<OrderDetail />} /> */}

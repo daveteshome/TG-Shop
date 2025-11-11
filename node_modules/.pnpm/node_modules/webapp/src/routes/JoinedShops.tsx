@@ -71,7 +71,7 @@ export default function JoinedShops() {
       {joined.map((t) => (
         <button
           key={t.id}
-          onClick={() => nav(`/shop/${t.slug}`)}
+          onClick={() => nav(`/s/${t.slug}`)}
           style={{
             background: "#fff",
             border: "1px solid rgba(0,0,0,.06)",

@@ -1,13 +1,14 @@
+// apps/webapp/src/components/layout/HeaderBar.tsx
 import React from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 type Props = {
-  onOpenMenu?: () => void;        // kept for compatibility, not used here anymore
-  title?: string;                 // kept for compatibility (you pass it)
-  onTitleClick?: () => void;      // kept for compatibility (you pass it)
-  onCartClick?: () => void;       // kept for compatibility (you pass it)
-  rightOverride?: React.ReactNode;// you pass overrides for shop pages; we honor them
+  onOpenMenu?: () => void;
+  title?: string;
+  onTitleClick?: () => void;
+  onCartClick?: () => void;
+  rightOverride?: React.ReactNode;
 };
 
 export default function HeaderBar({
@@ -21,16 +22,24 @@ export default function HeaderBar({
   const nav = useNavigate();
 
   const path = loc.pathname;
-  const isUniversalHome = path === "/" || path === "/universal";
-  const isShopHome = /^\/shop\/[^/]+$/.test(path);
-  const isMyShopHome = path === "/shops" || path === "/my";
-  const isRootLike = isUniversalHome || isShopHome || isMyShopHome;
 
-  const inShop = path.startsWith("/shop/");
+  // --- Context detection ---
+  const isUniversalHome = path === "/" || path === "/universal";
+  const isOwnerShopHome = /^\/shop\/[^/]+$/.test(path);
+  const isBuyerShopHome = /^\/s\/[^/]+$/.test(path);
+  const isMyShopHome = path === "/shops" || path === "/my";
+
+  const inOwnerShop = path.startsWith("/shop/");
+  const inBuyerShop = path.startsWith("/s/");
+  const inShop = inOwnerShop || inBuyerShop;
+
   const slug = inShop ? path.split("/")[2] : null;
+  const isRootLike =
+    isUniversalHome || isOwnerShopHome || isBuyerShopHome || isMyShopHome;
 
   const showBack = !isRootLike;
 
+  // --- Render ---
   return (
     <header
       style={{
@@ -50,7 +59,7 @@ export default function HeaderBar({
           padding: "0 12px",
         }}
       >
-        {/* Back only on non-root pages */}
+        {/* ← Back only on non-root pages */}
         {showBack ? (
           <button
             aria-label="Back"
@@ -60,7 +69,6 @@ export default function HeaderBar({
             ←
           </button>
         ) : (
-          // Keep your title click (acts as custom back in some screens)
           <button
             onClick={onTitleClick}
             style={{
@@ -73,7 +81,7 @@ export default function HeaderBar({
           </button>
         )}
 
-        {/* Search pill */}
+        {/* 🔍 Search bar */}
         <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
           <div
             style={{
@@ -107,21 +115,17 @@ export default function HeaderBar({
           </div>
         </div>
 
-        {/* Right side */}
+        {/* ❤️ or 🛒 on right side */}
         {rightOverride ? (
           rightOverride
         ) : isUniversalHome ? (
-          // ♥ Favorites on Universal
+          // Universal shop → show Favorites
           <Link to="/favorites" aria-label="Favorites" style={iconBtn}>
             ♥
           </Link>
         ) : inShop && slug ? (
-          // 🛒 Cart on shop pages
-          <button
-            aria-label="Cart"
-            onClick={onCartClick}
-            style={iconBtn}
-          >
+          // Shop pages (owner or buyer) → show Cart
+          <button aria-label="Cart" onClick={onCartClick} style={iconBtn}>
             🛒
           </button>
         ) : (
