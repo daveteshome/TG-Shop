@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api/index";
 import ShopCategoryFilterGridIdentical from "../components/shop/ShopCategoryFilterGridIdentical";
 import { ProductCard } from "../components/product/ProductCard";
+import { useWishlistCount } from "../lib/wishlist";
 
 type UiProduct = {
   id: string;
@@ -100,7 +101,6 @@ export default function Universal() {
         countsUrlOverride="/universal/categories/with-counts"
       />
 
-
       {/* Product list */}
       <div
         style={{
@@ -116,18 +116,22 @@ export default function Universal() {
             p.photoUrl ||
             `/api/products/${p.id}/image`;
 
-          const goto = () => {
-            nav(`/universal/p/${p.id}`); // ✅ go to universal detail
-          };
-
           return (
             <div
               key={p.id}
               role="button"
-              onClickCapture={(e) => {
+              tabIndex={0}
+              onClick={(e) => {
+                if ((e as any).defaultPrevented) return;
                 e.preventDefault();
                 e.stopPropagation();
-                goto();
+                nav(`/universal/p/${p.id}`);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  nav(`/universal/p/${p.id}`);
+                }
               }}
               style={{ cursor: "pointer" }}
             >
@@ -136,7 +140,6 @@ export default function Universal() {
                 mode="universal"
                 image={img}
                 shopName={p.tenant?.name}
-                shopPhone={undefined}
               />
             </div>
           );

@@ -28,6 +28,9 @@ import HeaderBar from "./components/layout/HeaderBar";
 import DrawerMenu from "./components/DrawerMenu";
 import ShopProfileDrawer from "./components/shop/ShopProfileDrawer";
 import FooterNav from "./components/layout/FooterNav";
+import Favorites from "./routes/Favorites";
+
+
 
 import { ensureInitDataCached, ready } from "./lib/telegram";
 
@@ -348,7 +351,12 @@ const onTitleClick =
     : undefined;
 
 
-  const onCartClick = () => nav("/cart");
+  const onCartClick = () => {
+    const m = loc.pathname.match(/^\/s\/([^/]+)/);
+    if (m) nav(`/s/${m[1]}/cart`);
+    else nav("/cart");
+  };
+
 
   // Reusable avatar button (uses shop logo/name)
   const avatarBtn = (
@@ -490,6 +498,12 @@ const onTitleClick =
             <Route path="/s/:slug" element={<ShopBuyer />} />
             <Route path="/s/:slug/p/:id" element={<ProductDetail />} />
             <Route path="/s/:slug/orders" element={<ShopOrders />} />
+
+            <Route path="/favorites" element={<Favorites />} />
+
+            // existing routes…
+                       {/* legacy/global */}
+            <Route path="/s/:slug/cart" element={<Cart />} />     {/* buyer-scoped */}
 
             {/* If you still use OrderDetail: */}
             {/* <Route path="/orders/:id" element={<OrderDetail />} /> */}

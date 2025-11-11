@@ -16,7 +16,7 @@ import { firstImageWebUrl } from "../services/image.resolve";
 import { resolveTenant } from '../middlewares/resolveTenant';
 import { telegramAuth } from '../api/telegramAuth';
 import multer from "multer";
-
+import { getTenantId, getTenantSlugFromReq } from '../services/tenant.util';
 import { upsertImageFromBytes  } from "../lib/r2";  // 👈 this exists in your repo
 //const upload = multer({ storage: multer.memoryStorage() });
 
@@ -1162,55 +1162,32 @@ api.get("/products/:id/image", async (req, res) => {
   }
 });
 
-import { getTenantId } from '../services/tenant.util';
-// ---------- Cart ----------
-api.get('/cart', async (req: any, res) => {
-  console.log('[API] GET /cart tenantId=', await getTenantId(), 'userId=', req.userId);
+
+// GET /api/cart
+// GET /api/cart
+api.get("/cart", async (req: any, res) => {
   const userId = req.userId!;
-  const cart = await CartService.list(userId);
-  res.json(cart || { id: null, userId, items: [] });
+  const slug = getTenantSlugFromReq(req);
+  if (!slug) return res.status(400).json({ error: "tenant_slug_required" });
+
+  const tenantId = await getTenantId(slug);
+  const cart = await CartService.list(userId, tenantId);
+  return res.json(cart || { id: null, userId, items: [] });
 });
 
-api.post('/cart/items', async (req: any, res) => {
+// POST /api/cart/items
+api.post("/cart/items", async (req: any, res) => {
   const userId = req.userId!;
   const { productId, qty } = req.body || {};
-  if (!productId) return res.status(400).json({ error: 'productId required' });
-  await CartService.add(userId, String(productId), int(qty, 1));
-  const cart = await CartService.list(userId);
-  res.json(cart);
+  if (!productId) return res.status(400).json({ error: "productId_required" });
+
+  const slug = getTenantSlugFromReq(req);
+  if (!slug) return res.status(400).json({ error: "tenant_slug_required" });
+
+  const tenantId = await getTenantId(slug);
+  const cart = await CartService.add(userId, String(productId), Number(qty ?? 1), tenantId);
+  return res.json(cart);
 });
-
-api.patch('/cart/items/:id', async (req: any, res) => {
-  console.log('[API] PATCH /cart/items', req.params.id, 'tenantId=', await getTenantId(), 'userId=', req.userId);
-  const itemId = String(req.params.id);
-  const { qtyDelta } = req.body || {};
-  if (!qtyDelta || !Number.isInteger(qtyDelta)) return res.status(400).json({ error: 'qtyDelta required (int)' });
-
-  if (qtyDelta > 0) {
-    await CartService.inc(itemId);
-  } else {
-    // apply |qtyDelta| times dec() — simple & safe
-    for (let i = 0; i < Math.abs(qtyDelta); i++) await CartService.dec(itemId);
-  }
-  res.json({ ok: true });
-});
-
-api.delete('/cart/items/:id', async (req: any, res) => {
-  const userId = req.userId!;
-  const itemId = String(req.params.id);
-
-  // Ensure item belongs to the user's cart before deleting
-  const item = await db.cartItem.findFirst({
-    where: { id: itemId, cart: { userId } },
-    select: { id: true },
-  });
-
-  if (!item) return res.status(404).json({ error: 'not found' });
-
-  await db.cartItem.delete({ where: { id: itemId } });
-  res.json({ ok: true });
-});
-
 
 // ---------- Checkout / Buy Now ----------
 api.post('/checkout', async (req: any, res) => {

@@ -2,6 +2,9 @@
 import React from "react";
 import { useLocation, useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useWishlistCount } from "../../lib/wishlist";
+import { useCartCount, refreshCartCount } from "../../lib/store";
+
 
 type Props = {
   onOpenMenu?: () => void;
@@ -10,6 +13,97 @@ type Props = {
   onCartClick?: () => void;
   rightOverride?: React.ReactNode;
 };
+
+function FavoriteHeaderButton() {
+  const n = useWishlistCount();
+  const nav = useNavigate();
+  return (
+    <button
+      onClick={() => nav("/favorites")}
+      aria-label={n > 0 ? `Favorites (${n})` : "Favorites"}
+      title={n > 0 ? `Favorites (${n})` : "Favorites"}
+      style={{
+        position: "relative",
+        background: "none",
+        border: "none",
+        fontSize: 20,
+        cursor: "pointer",
+        lineHeight: 1,
+      }}
+    >
+      ♥
+      {n > 0 && (
+        <span
+          style={{
+            position: "absolute",
+            top: -6,
+            right: -6,
+            background: "#e11",
+            color: "#fff",
+            borderRadius: 999,
+            fontSize: 10,
+            padding: "1px 5px",
+            lineHeight: 1,
+          }}
+        >
+          {n}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function CartHeaderButton() {
+  const n = useCartCount();
+  const nav = useNavigate();
+  const loc = useLocation();
+
+  // Detect buyer route: /s/:slug/*
+  const m = loc.pathname.match(/^\/s\/([^/]+)/);
+  const slug = m?.[1];
+
+  React.useEffect(() => {
+    // initial fetch for this context
+    refreshCartCount(slug);
+  }, [slug]);
+
+  const to = slug ? `/s/${slug}/cart` : "/cart";
+
+  return (
+    <button
+      onClick={() => nav(to)}
+      aria-label={n > 0 ? `Cart (${n})` : "Cart"}
+      title={n > 0 ? `Cart (${n})` : "Cart"}
+      style={{
+        position: "relative",
+        background: "none",
+        border: "none",
+        fontSize: 20,
+        cursor: "pointer",
+        lineHeight: 1,
+      }}
+    >
+      🛒
+      {n > 0 && (
+        <span
+          style={{
+            position: "absolute",
+            top: -6,
+            right: -6,
+            background: "#e11",
+            color: "#fff",
+            borderRadius: 999,
+            fontSize: 10,
+            padding: "1px 5px",
+            lineHeight: 1,
+          }}
+        >
+          {n}
+        </span>
+      )}
+    </button>
+  );
+}
 
 export default function HeaderBar({
   title,
@@ -119,15 +213,11 @@ export default function HeaderBar({
         {rightOverride ? (
           rightOverride
         ) : isUniversalHome ? (
-          // Universal shop → show Favorites
-          <Link to="/favorites" aria-label="Favorites" style={iconBtn}>
-            ♥
-          </Link>
+          // Universal home → show Favorites with live badge
+          <FavoriteHeaderButton />
         ) : inShop && slug ? (
           // Shop pages (owner or buyer) → show Cart
-          <button aria-label="Cart" onClick={onCartClick} style={iconBtn}>
-            🛒
-          </button>
+          <CartHeaderButton />
         ) : (
           <span style={{ ...iconBtn, visibility: "hidden" }} />
         )}

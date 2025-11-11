@@ -3,64 +3,49 @@ import { Prisma } from '@prisma/client';
 import { getTenantId } from './tenant.util';
 
 export const CartService = {
-  
-  async list(userId: string) {
-  const tenantId = await getTenantId();
-  console.log('[CartService.list] tenantId=', tenantId, 'userId=', userId);
-
-  const cart = await db.cart.findUnique({
-    where: { tenantId_userId: { tenantId, userId } },
-    include: {
-      items: {
-        include: {
-          product: {
-            select: {
-              title: true,
-              images: {
-                orderBy: { position: 'asc' },
-                take: 1,
-                select: { url: true },
+  async list(userId: string, tenantIdOverride?: string) {
+    const tenantId = tenantIdOverride ?? await getTenantId();
+    const cart = await db.cart.findUnique({
+      where: { tenantId_userId: { tenantId, userId } },
+      include: {
+        items: {
+          include: {
+            product: {
+              select: {
+                title: true,
+                images: { orderBy: { position: 'asc' }, take: 1, select: { url: true } },
               },
             },
+            variant: { select: { name: true } },
           },
-          variant: { select: { name: true } },
         },
       },
-    },
-  });
-
-  if (!cart) return null;
-
-  const items = cart.items.map((it) => {
-    const url = it.product.images[0]?.url ?? null;
-    console.log('[CartService.list] item', it.id, 'productId=', it.productId, 'imageUrl=', url);
-
+    });
+    if (!cart) return null;
     return {
-      id: it.id,
-      productId: it.productId,
-      qty: it.quantity,
-      price:
-        typeof (it.unitPrice as any)?.toNumber === 'function'
-          ? (it.unitPrice as unknown as Prisma.Decimal).toNumber()
-          : Number(it.unitPrice),
-      currency: String(it.currency),
-      title: it.product.title,
-      imageUrl: url,
+      id: cart.id,
+      userId,
+      items: cart.items.map((it) => ({
+        itemId: it.id,
+        productId: it.productId,
+        title: it.product?.title ?? '',
+        unitPrice: it.unitPrice,
+        currency: it.currency,
+        qty: it.quantity,
+        // add other fields if you show images here
+      })),
     };
-  });
+  },
 
-  return {
-    id: cart.id,
-    userId,
-    items,
-  };
-}
-,
+  async add(userId: string, productId: string, qty: number = 1, tenantIdOverride?: string) {
+    const tenantId = tenantIdOverride ?? await getTenantId();
 
-  async add(userId: string, productId: string, qty: number) {
-    const tenantId = await getTenantId();
-    const product = await db.product.findFirst({ where: { id: productId, tenantId, active: true } });
-    if (!product) throw new Error('product unavailable');
+    // Guard: product must be from the same tenant
+    const product = await db.product.findFirst({
+      where: { id: productId, tenantId },
+      select: { id: true, price: true, currency: true },
+    });
+    if (!product) throw new Error('product_not_found_in_tenant');
 
     const cart = await db.cart.upsert({
       where: { tenantId_userId: { tenantId, userId } },
@@ -86,11 +71,10 @@ export const CartService = {
         },
       });
     }
-    return this.list(userId);
+    return this.list(userId, tenantId);
   },
 
   async inc(itemId: string) {
-    console.log('[API] PATCH /cart/items on inc...........................................')
     const it = await db.cartItem.findUnique({ where: { id: itemId } });
     if (!it) return null;
     return db.cartItem.update({ where: { id: itemId }, data: { quantity: it.quantity + 1 } });
@@ -103,8 +87,8 @@ export const CartService = {
     return db.cartItem.update({ where: { id: itemId }, data: { quantity: it.quantity - 1 } });
   },
 
-  async clear(userId: string) {
-    const tenantId = await getTenantId();
+  async clear(userId: string, tenantIdOverride?: string) {
+    const tenantId = tenantIdOverride ?? await getTenantId();
     const cart = await db.cart.findUnique({ where: { tenantId_userId: { tenantId, userId } } });
     if (!cart) return;
     await db.cartItem.deleteMany({ where: { cartId: cart.id } });

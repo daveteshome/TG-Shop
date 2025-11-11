@@ -1,10 +1,15 @@
+// apps/webapp/src/routes/ShopBuyer.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../lib/api/index";
 import { ProductCard } from "../components/product/ProductCard";
-import type { Product as UiProduct } from "../lib/types";
-import ShopCategoryFilterGridIdentical from "../components/shop/ShopCategoryFilterGridIdentical";
 
+import type { Product as UiProduct } from "../lib/types";
+import type { Product as CardProduct } from "../components/product/ProductCard";
+import ShopCategoryFilterGridIdentical from "../components/shop/ShopCategoryFilterGridIdentical";
+import { getTelegramWebApp } from "../lib/telegram";
+import { addItem } from "../lib/api/cart";
+import { optimisticBumpCart } from "../lib/store";
 /* ---------- Types ---------- */
 type TenantLite = {
   id: string;
@@ -146,6 +151,22 @@ export default function ShopBuyer() {
     return list;
   }, [products, activeCatIds, q]);
 
+  /* ---------- Cart handler for overlay (buyer mode) ---------- */
+  const handleAddToCart = async (prod: CardProduct): Promise<void> => {
+  try {
+    await addItem(prod.id, 1, { tenantSlug: slug });   // 1) send slug
+    optimisticBumpCart(1);                              // 2) instant UI
+    window.dispatchEvent(new CustomEvent("tgshop:cart-updated", { detail: { tenantSlug: slug } })); // 3) background refresh
+
+    const tg = getTelegramWebApp();
+    if (tg && typeof (tg as any).showPopup === "function") {
+      (tg as any).showPopup({ title: "Cart", message: "Added to cart!", buttons: [{ id: "ok", type: "default", text: "OK" }] }, () => {});
+    }
+  } catch (err) {
+    console.error("Add to cart failed:", err);
+  }
+};
+
   /* ---------- Render ---------- */
   if (loading) return <div style={{ opacity: 0.7 }}>Loading shop…</div>;
   if (err)
@@ -202,40 +223,32 @@ export default function ShopBuyer() {
             null;
           const img = fromRelation || `/api/products/${p.id}/image`;
 
-          const goto = () => {
-            const url = `/s/${encodeURIComponent(slug!)}/p/${p.id}`;
-            // Prevent owner card links from hijacking
-            nav(url);
-          };
-
           return (
             <div
               key={p.id}
               role="button"
-              onClick={() => nav(`/s/${slug}/p/${p.id}`)}
               tabIndex={0}
-              // Capture phase prevents inner <a> default navigation
-              onClickCapture={(e) => {
+              onClick={(e) => {
+                if ((e as any).defaultPrevented) return;
                 e.preventDefault();
                 e.stopPropagation();
-                goto();
+                nav(`/s/${slug}/p/${p.id}`);
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
-                  goto();
+                  nav(`/s/${slug}/p/${p.id}`);
                 }
               }}
               style={{ cursor: "pointer" }}
             >
-
-              {/* keep card fully interactive visually, but clicks are captured above */}
               <ProductCard
                 p={p}
-                mode="universal"
+                mode="buyer"
                 image={img}
                 shopName={shopName}
                 shopPhone={shopPhone}
+                onAdd={handleAddToCart}
               />
             </div>
           );
@@ -249,14 +262,6 @@ export default function ShopBuyer() {
 }
 
 /* ---------- Styles ---------- */
-const searchInput: React.CSSProperties = {
-  border: "1px solid rgba(0,0,0,.08)",
-  borderRadius: 12,
-  padding: "9px 12px",
-  fontSize: 15,
-  outline: "none",
-};
-
 const grid: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",

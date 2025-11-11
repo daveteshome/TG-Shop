@@ -24,6 +24,7 @@ export const ENV = {
   R2_ACCESS_KEY_ID: required('R2_ACCESS_KEY_ID'),
   R2_ACCOUNT_ID: required('R2_ACCOUNT_ID'),
 
+  API_BASE: process.env.API_BASE || process.env.BASE_URL || "http://localhost:4000",
   // NEW
   DEFAULT_TENANT_SLUG: process.env.DEFAULT_TENANT_SLUG ?? 'demo',
 
