@@ -155,7 +155,6 @@ const upload = multer({ storage: multer.memoryStorage() });
 // real R2 upload
 api.post("/uploads/image", upload.single("file"), async (req: Request, res: ExResponse, next: NextFunction) => {
   try {
-    const userId = (req as any).userId as string | undefined;
     const tenantId = (req as any).tenantId || "global";
 
     const file = req.file;                          // <-- narrow
@@ -675,18 +674,12 @@ api.get("/shop/:slug/products", resolveTenant, async (req: any, res, next) => {
     });
 
     const items = products.map((p) => {
-      const first = p.images?.[0] || null;
+      const img  = p.images?.[0] || null;
 
       // Build R2 URL first (same as detail/logo)
-      const r2Url = first?.imageId
-        ? publicImageUrl(first.imageId, extFromMime(first.image?.mime))
+      const photoUrl = img ?.imageId
+        ? publicImageUrl(img .imageId, extFromMime(img .image?.mime))
         : null;
-
-      const legacyHttp = first?.url && /^https?:\/\//i.test(first.url) ? first.url : null;
-      const tgProxy =
-        first?.url && /^tg:file_id:/i.test(first.url) ? `/api/products/${p.id}/image` : null;
-
-      const photoUrl = r2Url ?? legacyHttp ?? tgProxy ?? null;
 
       return {
         id: p.id,
@@ -708,6 +701,7 @@ api.get("/shop/:slug/products", resolveTenant, async (req: any, res, next) => {
 });
 
 // GET single product with all images
+// GET /shop/:slug/products/:id
 api.get("/shop/:slug/products/:id", resolveTenant, async (req: any, res, next) => {
   try {
     const tenantId = req.tenantId!;
@@ -724,30 +718,29 @@ api.get("/shop/:slug/products/:id", resolveTenant, async (req: any, res, next) =
     const images = await db.productImage.findMany({
       where: { productId, tenantId },
       orderBy: { position: "asc" },
-      select: { id: true, imageId: true, tgFileId: true, url: true, position: true },
+      select: { id: true, imageId: true, position: true },
     });
 
-    // turn imageId into public url (same logic you already have)
     const imagesWithUrl = await Promise.all(
       images.map(async (im) => {
-        if (im.imageId) {
-          const imgRow = await db.image.findUnique({
-            where: { id: im.imageId },
-            select: { mime: true },
-          });
-          const mime = imgRow?.mime?.toLowerCase() || "image/jpeg";
-          let ext: "jpg" | "png" | "webp" = "jpg";
-          if (mime.includes("png")) ext = "png";
-          else if (mime.includes("webp")) ext = "webp";
-          return {
-            ...im,
-            webUrl: publicImageUrl(im.imageId!, ext),
-          };
+        if (!im.imageId) {
+          return { ...im, webUrl: null };
         }
-        if (im.url) {
-          return { ...im, webUrl: im.url };
-        }
-        return { ...im, webUrl: null };
+
+        const imgRow = await db.image.findUnique({
+          where: { id: im.imageId },
+          select: { mime: true },
+        });
+
+        const mime = imgRow?.mime?.toLowerCase() || "image/jpeg";
+        let ext: "jpg" | "png" | "webp" = "jpg";
+        if (mime.includes("png")) ext = "png";
+        else if (mime.includes("webp")) ext = "webp";
+
+        return {
+          ...im,
+          webUrl: publicImageUrl(im.imageId, ext),
+        };
       })
     );
 
@@ -1031,6 +1024,136 @@ api.get("/categories", async (_req, res, next) => {
   }
 });
 
+api.get(
+  "/shop/:slug/categories/:categoryId/products",
+  resolveTenant,
+  async (req: any, res, next) => {
+    try {
+      const tenantId = req.tenantId as string;
+      const categoryId = req.params.categoryId as string;
+
+      // Fetch products for this tenant + category
+      const items = await db.product.findMany({
+        where: {
+          tenantId,
+          categoryId,
+          active: true,
+        },
+        include: {
+          images: {
+            orderBy: { position: "asc" },
+            take: 1,
+            select: {
+              url: true,
+              imageId: true,
+              image: { select: { mime: true } }, // 👈 now TS knows about image.mime
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+
+      // Map to the shape your frontend expects (`photoUrl`, etc.)
+      const products = items.map((p) => {
+        const img = p.images?.[0] || null;
+
+        // Build R2 URL first (same logic as /shop/:slug/products)
+        const photoUrl = img?.imageId
+          ? publicImageUrl(img.imageId, extFromMime(img.image?.mime))
+          : null;
+
+        return {
+          id: p.id,
+          title: p.title,
+          description: p.description,
+          price: p.price,
+          currency: p.currency,
+          stock: p.stock ?? 0,
+          categoryId: p.categoryId,
+          photoUrl,
+        };
+      });
+
+      res.json({ products });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+
+// List universal products for a given category (for ProductDetail related in universal mode)
+api.get("/universal/category/:categoryId/products", async (req, res, next) => {
+  try {
+    const categoryId = String(req.params.categoryId);
+
+    const items = await db.product.findMany({
+      where: {
+        categoryId,
+        active: true,
+        publishToUniversal: true,
+        tenant: {
+          publishUniversal: true, // only from shops that are visible in universal
+        },
+      },
+      include: {
+        images: {
+          orderBy: { position: "asc" },
+          take: 1,
+          select: {
+            url: true,
+            imageId: true,
+            image: { select: { mime: true } }, // needed for extFromMime
+          },
+        },
+        tenant: {
+          select: {
+            id: true,
+            slug: true,
+            name: true,
+            publicPhone: true,
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const products = items.map((p) => {
+      const first = p.images?.[0];
+
+      // Build photoUrl exactly like other catalog endpoints
+      const mime = first?.image?.mime ?? undefined;
+      const r2Url = first?.imageId
+        ? publicImageUrl(first.imageId, extFromMime(mime))
+        : null;
+
+      const httpUrl =
+        first?.url && /^https?:\/\//i.test(first.url) ? first.url : null;
+
+      const photoUrl =
+        r2Url ??
+        httpUrl ??
+        `/api/products/${p.id}/image`; // universal fallback proxy
+
+      return {
+        id: p.id,
+        title: p.title,
+        description: p.description,
+        price: p.price,
+        currency: p.currency,
+        stock: p.stock ?? 0,
+        categoryId: p.categoryId,
+        photoUrl,
+        tenant: p.tenant,
+      };
+    });
+
+    res.json({ products });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ... your other api routes ...
 
 const DEV = process.env.NODE_ENV !== "production";
@@ -1074,9 +1197,11 @@ api.get("/products/:id/image", async (req, res) => {
         images: {
           orderBy: { position: "asc" },
           take: 1,
-          select: { tgFileId: true, imageId: true, url: true },
+          select: {
+            imageId: true,
+            image: { select: { mime: true } },
+          },
         },
-        tenant: { select: { slug: true } },
       },
     });
 
@@ -1086,86 +1211,46 @@ api.get("/products/:id/image", async (req, res) => {
     }
 
     const im = p.images?.[0];
-    if (!im) {
-      console.warn("[image:route] no image rows", { productId: id });
+    if (!im?.imageId) {
+      console.warn("[image:route] no imageId for product", { productId: id });
       return res.status(404).send(`No image for product: ${id}`);
     }
 
-    // 2) R2 image → fetch and stream (avoid redirect so we control headers)
-    if (im.imageId) {
-      const url = publicImageUrl(im.imageId, "jpg");
+    const ext = extFromMime(im.image?.mime);
+    const url = publicImageUrl(im.imageId, ext);
 
-      const r2 = await fetch(url);
-      if (!r2.ok) {
-        const t = await r2.text().catch(() => "");
-        console.error("[image:route] r2 fetch failed", { status: r2.status, body: t.slice(0,200), url });
-        return res.status(502).send("R2 fetch failed");
-      }
-
-      // Force correct headers for <img>
-      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-      res.setHeader("Content-Type", r2.headers.get("content-type") || "image/jpeg");
-
-      const body: any = r2.body;
-      if (body && typeof (Readable as any).fromWeb === "function") {
-        return (Readable as any).fromWeb(body).pipe(res);
-      }
-      const buf = Buffer.from(await r2.arrayBuffer());
-      res.setHeader("Content-Length", String(buf.length));
-      return res.end(buf);
-}
-
-
-    if (im.url && /^https?:\/\//i.test(im.url)) {
-      res.setHeader("Cache-Control", "public, max-age=3600");
-      return res.redirect(302, im.url);
+    const r2 = await fetch(url);
+    if (!r2.ok) {
+      const t = await r2.text().catch(() => "");
+      console.error("[image:route] r2 fetch failed", {
+        status: r2.status,
+        body: t.slice(0, 200),
+        url,
+      });
+      return res.status(502).send("R2 fetch failed");
     }
 
-    if (im.tgFileId) {
-      const slug = p.tenant?.slug;
-      const botToken = resolveBotToken(slug);
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    res.setHeader("Content-Type", r2.headers.get("content-type") || "image/jpeg");
 
-      if (!botToken) {
-        console.error("[image:route] missing bot token", { productId: id, slug });
-        return res.status(500).send(`BOT_TOKEN missing for tenant ${slug ?? "(unknown)"}`);
-      }
-      const meta = await fetch(
-        `https://api.telegram.org/bot${botToken}/getFile?file_id=${encodeURIComponent(im.tgFileId)}`
-      );
-      const metaJson: any = await meta.json().catch(() => null);
-      if (!metaJson?.ok || !metaJson?.result?.file_path) {
-        console.error("[image:route] getFile failed", { productId: id, meta: metaJson });
-        return res.status(502).send(`Telegram getFile error`);
-      }
-
-      const fileUrl = `https://api.telegram.org/file/bot${botToken}/${metaJson.result.file_path}`;
-      const tgResp = await fetch(fileUrl);
-      if (!tgResp.ok) {
-        const t = await tgResp.text();
-        console.error("[image:route] telegram fetch failed", { productId: id, status: tgResp.status, body: t.slice(0, 200) });
-        return res.status(502).send(`Telegram file fetch ${tgResp.status}`);
-      }
-
-      res.setHeader("Cache-Control", "public, max-age=3600");
-      res.setHeader("Content-Type", tgResp.headers.get("content-type") ?? "image/jpeg");
-
-      const body: any = tgResp.body;
-      if (body && typeof (Readable as any).fromWeb === "function") {
-        return (Readable as any).fromWeb(body).pipe(res);
-      }
-
-      const buf = Buffer.from(await tgResp.arrayBuffer());
-      res.setHeader("Content-Length", String(buf.length));
-      return res.end(buf);
+    const body: any = r2.body;
+    if (body && typeof (Readable as any).fromWeb === "function") {
+      return (Readable as any).fromWeb(body).pipe(res);
     }
 
-    console.warn("[image:route] unsupported image source", { productId: id, im });
-    return res.status(400).send("Unsupported image source");
+    const buf = Buffer.from(await r2.arrayBuffer());
+    res.setHeader("Content-Length", String(buf.length));
+    return res.end(buf);
   } catch (err: any) {
-    console.error("[image:route] error", { productId: id, err: err?.message, stack: err?.stack });
+    console.error("[image:route] error", {
+      productId: id,
+      err: err?.message,
+      stack: err?.stack,
+    });
     return res.status(500).send(`image proxy error: ${err?.message ?? String(err)}`);
   }
 });
+
 
 
 // GET /api/cart

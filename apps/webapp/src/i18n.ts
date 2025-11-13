@@ -141,6 +141,8 @@ i18n
           title_categories: "Categories",
           categories_no_children: "No subcategories",
           msg_failed_to_load: "Failed to load",
+          label_related: "Related Products",
+          label_description: "Description",
 
         },
       },
