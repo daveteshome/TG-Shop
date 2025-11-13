@@ -9,6 +9,7 @@ import Profile from "./routes/Profile";
 import Orders from "./routes/Orders";
 import OrderDetail from "./routes/OrderDetail";
 import ProductDetail from "./routes/ProductDetail";
+import OwnerProductDetail from "./routes/OwnerProductDetail";
 import Categories from "./routes/Categories";
 import Products from "./routes/Products";
 import Universal from "./routes/Universal";
@@ -30,8 +31,6 @@ import ShopProfileDrawer from "./components/shop/ShopProfileDrawer";
 import FooterNav from "./components/layout/FooterNav";
 import Favorites from "./routes/Favorites";
 
-
-
 import { ensureInitDataCached, ready } from "./lib/telegram";
 
 /* ====================== Styles ====================== */
@@ -49,6 +48,22 @@ const appStyle: React.CSSProperties = {
 };
 
 /* ====================== Helpers ====================== */
+
+/** Normalize a react-router location for both BrowserRouter / HashRouter and /tma prefix */
+function routedPath(loc: ReturnType<typeof useLocation>): string {
+  const hash = (loc as any).hash || "";
+  const hashPath = hash.startsWith("#/") ? hash.slice(1) : null;
+  const base = (hashPath ?? loc.pathname) || "/";
+  return base.replace(/^\/tma(?=\/|$)/, "") || "/";
+}
+
+/** Read current path from window (same normalization) */
+function routedPathFromWindow(): string {
+  const hash = window.location.hash || "";
+  const hashPath = hash.startsWith("#/") ? hash.slice(1) : null;
+  const base = (hashPath ?? window.location.pathname) || "/";
+  return base.replace(/^\/tma(?=\/|$)/, "") || "/";
+}
 
 // Decide where "back" should go from the current path
 // number means use history steps (e.g., -1), string means a concrete path
@@ -84,31 +99,80 @@ function getBackTarget(pathname: string): string | number | null {
   return null;
 }
 
+/* ====================== Memory: separate Resume vs Back ====================== */
 
-function useSaveLastPage() {
+/**
+ * Save the EXACT current path (detail or list) for resume-after-close.
+ * Writes: tgshop:lastPathExact
+ */
+function useRememberExactPath() {
   const loc = useLocation();
   useEffect(() => {
-    const path = loc.pathname || "/";
-    // OPTIONAL: if you want to ignore some paths, do it here:
-    // if (path.startsWith("/auth")) return;
-    localStorage.setItem("tgshop:lastShopPage", path);
-    localStorage.setItem("tgshop:lastShopPageAt", String(Date.now()));
-  }, [loc.pathname]);
+    try {
+      const exact = routedPath(loc) + (loc.search || "");
+      localStorage.setItem("tgshop:lastPathExact", exact);
+      localStorage.setItem("tgshop:lastPathExactAt", String(Date.now()));
+    } catch {}
+  }, [loc.pathname, (loc as any).hash, loc.search]);
+}
+
+/**
+ * Save only LIST pages for Back fallbacks (do NOT overwrite with detail).
+ * Writes:
+ *  - tgshop:lastUniversalPage     (when on / or /universal[?…])
+ *  - tgshop:lastShopPage          (when on /s/:slug[?…] or /shop/:slug[?…])
+ */
+function useSaveListPagesOnly() {
+  const loc = useLocation();
+  useEffect(() => {
+    const pathOnly = routedPath(loc);
+    const full = pathOnly + (loc.search || "");
+
+    // Ignore detail pages entirely for list memory
+    if (
+      /^\/universal\/p\/[^/]+$/.test(pathOnly) ||
+      /^\/s\/[^/]+\/p\/[^/]+$/.test(pathOnly) ||
+      /^\/shop\/[^/]+\/p\/[^/]+$/.test(pathOnly)
+    ) {
+      return;
+    }
+
+    try {
+      // Universal list memory
+      if (pathOnly === "/" || pathOnly === "/universal" || pathOnly.startsWith("/universal?")) {
+        localStorage.setItem("tgshop:lastUniversalPage", full);
+        localStorage.setItem("tgshop:lastUniversalPageAt", String(Date.now()));
+      }
+
+      // Buyer list memory
+      if (/^\/s\/[^/]+(?:$|\?)/.test(full)) {
+        localStorage.setItem("tgshop:lastShopPage", full);
+        localStorage.setItem("tgshop:lastShopPageAt", String(Date.now()));
+      }
+
+      // Owner list memory (optional, mirrors buyer)
+      if (/^\/shop\/[^/]+(?:$|\?)/.test(full)) {
+        localStorage.setItem("tgshop:lastOwnerShopPage", full);
+        localStorage.setItem("tgshop:lastOwnerShopPageAt", String(Date.now()));
+      }
+    } catch {}
+  }, [loc.pathname, (loc as any).hash, loc.search]);
 }
 
 /**
  * Auto-join + resume behavior.
- * - Reads join code from Telegram initData (start_param) OR from ?tgWebAppStartParam=join_xxx
- * - Calls /invites/accept (idempotent) – expects { joined: boolean, tenant?: { slug?: string } }
- * - On success navigates to /shop/:slug and stores it in tgshop:lastShopPage
- * - If no join code or failure → resume last page (tgshop:lastShopPage) if present
+ * Reads join code from Telegram initData (start_param) OR from ?tgWebAppStartParam=join_xxx
+ * - If join code exists: POST /invites/accept and navigate to /shop/:slug (and seed list memory).
+ * - Else: resume to the most precise memory we have:
+ *      1) tgshop:lastPathExact    (detail OR list) — preferred
+ *      2) tgshop:lastShopPage / lastUniversalPage  (list only fallback)
  */
 function useAutoJoinAndResume() {
   const nav = useNavigate();
   const hasRunRef = React.useRef(false);
 
   useEffect(() => {
-    if (hasRunRef.current) return;         // ✅ run once per app load
+    if (hasRunRef.current) return; // run once per app load
     hasRunRef.current = true;
 
     const tg = (window as any).Telegram?.WebApp;
@@ -119,22 +183,44 @@ function useAutoJoinAndResume() {
 
     const code = startParam.startsWith("join_") ? startParam.slice("join_".length).trim() : "";
 
-    const handledKey   = code ? `tgshop:join-handled:${code}` : "tgshop:join-handled";
-    const lastPageKey  = "tgshop:lastShopPage";
-    const lastPageAtKey= "tgshop:lastShopPageAt";
-    const resumeOnceKey= "tgshop:resume-once";
-    const RESUME_TTL_MS= 1000 * 60 * 60 * 12; // 12h
+    const handledKey = code ? `tgshop:join-handled:${code}` : "tgshop:join-handled";
+    const resumeOnceKey = "tgshop:resume-once";
+    const RESUME_TTL_MS = 1000 * 60 * 60 * 12; // 12h
+
+    function getIfFresh(key: string, atKey: string): string | null {
+      try {
+        const p = localStorage.getItem(key);
+        const at = Number(localStorage.getItem(atKey) || "0");
+        if (!p) return null;
+        if (Date.now() - at > RESUME_TTL_MS) return null;
+        return p;
+      } catch {
+        return null;
+      }
+    }
 
     function tryResumePolitely() {
       try {
         if (sessionStorage.getItem(resumeOnceKey)) return; // once per session
-        const saved   = localStorage.getItem(lastPageKey);
-        const savedAt = Number(localStorage.getItem(lastPageAtKey) || "0");
-        if (!saved) return;
-        if ((Date.now() - savedAt) > RESUME_TTL_MS) return;
-        if (window.location.pathname !== "/" && window.location.pathname !== "") return; // only from root
-        sessionStorage.setItem(resumeOnceKey, "1");
-        nav(saved, { replace: true });
+
+        // 1) Exact last path (detail or list)
+        const exact = getIfFresh("tgshop:lastPathExact", "tgshop:lastPathExactAt");
+
+        // 2) Fallbacks: list memories
+        const lastShop = getIfFresh("tgshop:lastShopPage", "tgshop:lastShopPageAt");
+        const lastUni = getIfFresh("tgshop:lastUniversalPage", "tgshop:lastUniversalPageAt");
+
+        const current = routedPathFromWindow();
+        if (current !== "/" && current !== "") {
+          sessionStorage.setItem(resumeOnceKey, "1");
+          return; // don't fight when already deep-linked
+        }
+
+        const target = exact || lastShop || lastUni;
+        if (target) {
+          sessionStorage.setItem(resumeOnceKey, "1");
+          nav(target, { replace: true });
+        }
       } catch {}
     }
 
@@ -156,10 +242,14 @@ function useAutoJoinAndResume() {
         if (slug) {
           sessionStorage.setItem(handledKey, "1"); // only after success
           const target = `/shop/${slug}`;
-          // Set a starting last page (will be overwritten by useSaveLastPage as user navigates)
-          localStorage.setItem(lastPageKey, target);
-          localStorage.setItem(lastPageAtKey, String(Date.now()));
-          if (window.location.pathname !== target) {
+
+          // Seed list memory for owner/buyer contexts
+          try {
+            localStorage.setItem("tgshop:lastShopPage", target);
+            localStorage.setItem("tgshop:lastShopPageAt", String(Date.now()));
+          } catch {}
+
+          if (routedPathFromWindow() !== target) {
             nav(target, { replace: true });
           }
         } else {
@@ -169,9 +259,8 @@ function useAutoJoinAndResume() {
         tryResumePolitely();
       }
     })();
-  }, []); // ✅ empty deps
+  }, [nav]);
 }
-
 
 /* ====================== App ====================== */
 
@@ -183,18 +272,19 @@ export default function App() {
   const loc = useLocation();
   const nav = useNavigate();
 
-    // True Back behavior for center area
-
+  // Memory: keep BOTH behaviors
+  useRememberExactPath();     // resume-after-close (detail or list)
+  useSaveListPagesOnly();     // back fallbacks (list only)
 
   // 🔑 Auto-join + resume (runs once)
   useAutoJoinAndResume();
-  useSaveLastPage();
 
   // Route helpers
   const isProductDetail =
-  /^(?:\/shop|\/s)\/[^/]+\/p\/[^/]+$/.test(loc.pathname) ||
-  /^\/universal\/p\/[^/]+$/.test(loc.pathname);const isShopRoot = /^\/shop\/[^/]+$/.test(loc.pathname);
-  const isShopChild = /^\/shop\/[^/]+\/.+$/.test(loc.pathname);
+    /^(?:\/shop|\/s)\/[^/]+\/p\/[^/]+$/.test(routedPath(loc)) ||
+    /^\/universal\/p\/[^/]+$/.test(routedPath(loc));
+  const isShopRoot = /^\/shop\/[^/]+$/.test(routedPath(loc));
+  const isShopChild = /^\/shop\/[^/]+\/.+$/.test(routedPath(loc));
 
   // Shop header context (filled by Shop/ShopSettings via window event)
   const [shopCtx, setShopCtx] = useState<{
@@ -265,7 +355,7 @@ export default function App() {
     return () => window.removeEventListener("tgshop:open-shop-menu", onOpenShopMenu);
   }, []);
 
-  // Restore last path once (but skip if a join was handled)
+  // (Kept) Restore last path once (but skip if a join was handled)
   useEffect(() => {
     const t = setTimeout(() => {
       try {
@@ -292,71 +382,73 @@ export default function App() {
     return () => clearTimeout(t);
   }, [nav]);
 
-  // Save current path
+  // (Kept) Save current path under legacy key tgshop:lastPath (doesn't hurt;
+  // our resume hook uses lastPathExact, so this remains for compatibility)
   useEffect(() => {
-    if (!didRestore && loc.pathname === "/") return;
+    if (!didRestore && routedPath(loc) === "/") return;
     try {
-      localStorage.setItem("tgshop:lastPath", loc.pathname);
+      localStorage.setItem("tgshop:lastPath", routedPath(loc));
     } catch {}
-  }, [loc.pathname, didRestore]);
+  }, [loc.pathname, (loc as any).hash, didRestore]);
 
-  // Also persist last visited shop page for resume logic
+  // Also persist last visited owner shop page for other logic (unchanged)
   useEffect(() => {
-    if (loc.pathname.startsWith("/shop/")) {
+    if (routedPath(loc).startsWith("/shop/")) {
       try {
-        localStorage.setItem("tgshop:lastShopPage", loc.pathname);
+        localStorage.setItem("tgshop:lastShopPage", routedPath(loc));
+        localStorage.setItem("tgshop:lastShopPageAt", String(Date.now()));
       } catch {}
     }
-  }, [loc.pathname]);
+  }, [loc.pathname, (loc as any).hash]);
 
   // Compute human title for non-back states (kept for Home/fallbacks)
   const computedTitle = useMemo(() => {
+    const p = routedPath(loc);
     if (isShopRoot || isShopChild) return shopCtx.name || "Shop";
-    if (loc.pathname === "/") return "Home";
-    if (loc.pathname.startsWith("/universal")) return "Universal Shop";
-    if (loc.pathname.startsWith("/shops")) return "Shops";
-    if (loc.pathname.startsWith("/orders")) return "My Orders";
-    if (loc.pathname.startsWith("/cart")) return "Cart";
-    if (loc.pathname.startsWith("/profile")) return "Profile";
+    if (p === "/") return "Home";
+    if (p.startsWith("/universal")) return "Universal Shop";
+    if (p.startsWith("/shops")) return "Shops";
+    if (p.startsWith("/orders")) return "My Orders";
+    if (p.startsWith("/cart")) return "Cart";
+    if (p.startsWith("/profile")) return "Profile";
     return "TG Shop";
-  }, [loc.pathname, isShopRoot, isShopChild, shopCtx.name]);
+  }, [loc.pathname, (loc as any).hash, isShopRoot, isShopChild, shopCtx.name]);
 
-  const backTarget = useMemo(() => getBackTarget(loc.pathname), [loc.pathname]);
+  const backTarget = useMemo(() => getBackTarget(routedPath(loc)), [loc.pathname, (loc as any).hash]);
   const headerTitle = backTarget ? "←" : computedTitle;
 
-const onTitleClick =
-  backTarget != null
-    ? () => {
-        if (typeof backTarget === "number") {
-          // If history is too shallow (e.g., direct link), fall back smartly
-          const isBuyer = /^\/s\//.test(loc.pathname);
-          const isOwner = /^\/shop\//.test(loc.pathname);
+  const onTitleClick =
+    backTarget != null
+      ? () => {
+          if (typeof backTarget === "number") {
+            // If history is too shallow (e.g., direct link), fall back smartly
+            const p = routedPath(loc);
+            const isBuyer = /^\/s\//.test(p);
+            const isOwner = /^\/shop\//.test(p);
 
-          if (window.history.length > 1) {
-            nav(backTarget as number);
-          } else if (isBuyer) {
-            // fallback when landing directly on buyer detail
-            const m = loc.pathname.match(/^\/s\/([^/]+)/);
-            nav(m ? `/s/${m[1]}` : "/joined", { replace: true });
-          } else if (isOwner) {
-            const m = loc.pathname.match(/^\/shop\/([^/]+)/);
-            nav(m ? `/shop/${m[1]}` : "/shops", { replace: true });
+            if (window.history.length > 1) {
+              nav(backTarget as number);
+            } else if (isBuyer) {
+              const m = p.match(/^\/s\/([^/]+)/);
+              nav(m ? `/s/${m[1]}` : "/joined", { replace: true });
+            } else if (isOwner) {
+              const m = p.match(/^\/shop\/([^/]+)/);
+              nav(m ? `/shop/${m[1]}` : "/shops", { replace: true });
+            } else {
+              nav("/", { replace: true });
+            }
           } else {
-            nav("/", { replace: true });
+            nav(backTarget as string);
           }
-        } else {
-          nav(backTarget as string);
         }
-      }
-    : undefined;
-
+      : undefined;
 
   const onCartClick = () => {
-    const m = loc.pathname.match(/^\/s\/([^/]+)/);
+    const p = routedPath(loc);
+    const m = p.match(/^\/s\/([^/]+)/);
     if (m) nav(`/s/${m[1]}/cart`);
     else nav("/cart");
   };
-
 
   // Reusable avatar button (uses shop logo/name)
   const avatarBtn = (
@@ -436,7 +528,7 @@ const onTitleClick =
     </button>
   );
 
-    return (
+  return (
     <div style={appStyle}>
       {/* keep your conditional wrapper */}
       {!isProductDetail && (
@@ -447,7 +539,7 @@ const onTitleClick =
             onTitleClick={onTitleClick}
             onCartClick={onCartClick}
             rightOverride={
-              loc.pathname === "/shops"
+              routedPath(loc) === "/shops"
                 ? rightForShopsPage
                 : (isShopRoot
                     ? rightForShopRoot
@@ -462,7 +554,7 @@ const onTitleClick =
             onClose={() => setProfileOpen(false)}
             tenant={{
               name: shopCtx.name ?? null,
-              slug: shopCtx.slug ?? (loc.pathname.match(/^\/shop\/([^/]+)/)?.[1] ?? null),
+              slug: shopCtx.slug ?? (routedPath(loc).match(/^\/shop\/([^/]+)/)?.[1] ?? null),
               logoWebUrl: shopCtx.logoWebUrl ?? null,
               publishUniversal: false,
             }}
@@ -473,13 +565,13 @@ const onTitleClick =
       <main style={{ paddingTop: isProductDetail ? 0 : 8, paddingBottom: 70 }}>
         <ErrorBoundary>
           <Routes>
-            <Route path="/" element={<Universal  />} />
+            <Route path="/" element={<Universal />} />
             <Route path="/universal" element={<Universal />} />
             <Route path="/universal/p/:id" element={<ProductDetail />} />
 
             <Route path="/shops" element={<ShopList />} />
             <Route path="/shop/:slug" element={<Shop />} />
-            <Route path="/shop/:slug/p/:id" element={<ProductDetail />} />
+            <Route path="/shop/:slug/p/:id" element={<OwnerProductDetail />} />
 
             {/* Shop profile routes */}
             <Route path="/shop/:slug/settings" element={<ShopSettings />} />
@@ -501,16 +593,15 @@ const onTitleClick =
 
             <Route path="/favorites" element={<Favorites />} />
 
-            // existing routes…
-                       {/* legacy/global */}
-            <Route path="/s/:slug/cart" element={<Cart />} />     {/* buyer-scoped */}
+            {/* legacy/global */}
+            <Route path="/s/:slug/cart" element={<Cart />} /> {/* buyer-scoped */}
 
             {/* If you still use OrderDetail: */}
             {/* <Route path="/orders/:id" element={<OrderDetail />} /> */}
           </Routes>
         </ErrorBoundary>
       </main>
-      {/* ✅ New: bottom nav controls the same DrawerMenu */}
+      {/* bottom nav controls the same DrawerMenu */}
       {!isProductDetail && (
         <FooterNav onOpenMenu={() => setDrawerOpen(true)} />
       )}

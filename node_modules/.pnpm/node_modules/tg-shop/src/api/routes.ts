@@ -19,7 +19,7 @@ import multer from "multer";
 import { getTenantId, getTenantSlugFromReq } from '../services/tenant.util';
 import { upsertImageFromBytes  } from "../lib/r2";  // 👈 this exists in your repo
 //const upload = multer({ storage: multer.memoryStorage() });
-
+import SearchRouter from "../services/search";
 
 // ── ADD near other imports ─────────────────────────────────────────────────────
 import { listCategoriesWithCountsForShop } from "../services/catalog.service";
@@ -31,6 +31,7 @@ type ReqWithTenant = Request & { tenantId?: string; tenant?: Tenant };
 
 
 export const api = Router();
+
 
 const BOT_TOKEN = process.env.BOT_TOKEN!;
 if (!BOT_TOKEN) {
@@ -103,12 +104,16 @@ api.get('/_whoami', async (_req, res) => {
   }
 });
 
+api.use(SearchRouter);
 
 //api.post('/auth/telegram', authTelegramHandler);
 // -------- AUTH GUARD --------
 api.use(telegramAuth);
 
 
+api.use("/s/:slug", resolveTenant, SearchRouter);
+
+// 3) Global mount for universal/buyer flows
 
 // GET /shops/list?userId=123
 // GET /shops/list → returns shops for *authenticated* Telegram user

@@ -7,6 +7,8 @@ import ShopProfileDrawer from "../components/shop/ShopProfileDrawer";
 import CategoryCascader from "../components/CategoryCascader";
 import { useTranslation } from "react-i18next";
 import ShopCategoryFilterGridIdentical from "../components/shop/ShopCategoryFilterGridIdentical";
+import SearchBox from "../components/search/SearchBox";
+
 
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 
@@ -107,6 +109,14 @@ type UiImage = UiImageNew | UiImageExisting;
 
 export default function Shop() {
   const { slug } = useParams<{ slug: string }>();
+  useEffect(() => {
+    if (!slug) return;
+    window.dispatchEvent(new CustomEvent("tgshop:search-config", {
+      detail: { scope: "owner", tenantSlug: slug, placeholder: "Search my shop…", basePath: `/s/${slug}/search` },
+    }));
+  }, [slug]);
+
+
   const loc = useLocation();
   const nav = useNavigate();
   const { t } = useTranslation();

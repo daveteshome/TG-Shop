@@ -1,9 +1,22 @@
+// apps/webapp/src/routes/ProductDetail.tsx
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { api } from "../lib/api/index";
-import { getInitDataRaw, getTelegramWebApp } from "../lib/telegram";
-import CategoryCascader from "../components/CategoryCascader";
+import { getTelegramWebApp } from "../lib/telegram";
 import { useTranslation } from "react-i18next";
+import HeaderBar from "../components/layout/HeaderBar";
+import { ProductCard } from "../components/product/ProductCard";
+import * as wish from "../lib/wishlist";
+import { addItem } from "../lib/api/cart";
+import { optimisticBumpCart, refreshCartCount } from "../lib/store";
+
+/* ---------- Helpers ---------- */
+function routedPath(loc: ReturnType<typeof useLocation>): string {
+  const hash = loc.hash || "";
+  const hashPath = hash.startsWith("#/") ? hash.slice(1) : null;
+  const base = hashPath ?? loc.pathname;
+  return base.replace(/^\/tma(?=\/|$)/, "");
+}
 
 /* ---------- Types ---------- */
 type Product = {
@@ -15,235 +28,69 @@ type Product = {
   stock?: number | null;
   categoryId?: string | null;
   photoUrl?: string | null;
-  images?: Array<{
-    id?: string;
-    imageId?: string | null;
-    webUrl?: string | null;
-    url?: string | null;
-    position?: number;
-  }>;
   tenant?: { id?: string; slug?: string; name?: string; publicPhone?: string | null };
+  images?: Array<{ id?: string; webUrl?: string | null; url?: string | null }>;
 };
 
-type ProductImage = {
-  id?: string;
-  imageId?: string | null;
-  webUrl?: string | null;
-  url?: string | null;
-  position?: number;
-};
-
-/* ---------- Component ---------- */
 export default function ProductDetail() {
   const { slug, id } = useParams<{ slug?: string; id: string }>();
   const nav = useNavigate();
-  const { pathname } = useLocation();
+  const loc = useLocation();
+  const path = routedPath(loc);
   const { t } = useTranslation();
 
-  /* Mode detection that works in TMA and web */
-  const cleanPath = pathname.replace(/^\/?tma\//, "").replace(/^\/+/, "");
-  const isOwner = cleanPath.startsWith("shop/");
-  const isBuyer = cleanPath.startsWith("s/");
-  const isUniversal = cleanPath.startsWith("universal/");
-  const mode: "owner" | "buyer" | "universal" =
-    isOwner ? "owner" : isBuyer ? "buyer" : "universal";
+  // Modes we keep: buyer (/s/:slug/...) and universal (/universal/...)
+  const isBuyer = path.startsWith("/s/");
+  const isUniversal = path.startsWith("/universal/");
+  type Mode = "buyer" | "universal";
+  const mode: Mode = isBuyer ? "buyer" : "universal";
 
-  /* State */
   const [loading, setLoading] = useState(true);
   const [product, setProduct] = useState<Product | null>(null);
-  const [images, setImages] = useState<ProductImage[]>([]);
-  const [err, setErr] = useState<string | null>(null);
+  const [images, setImages] = useState<Product["images"]>([]);
   const [idx, setIdx] = useState(0);
+  const [related, setRelated] = useState<Product[]>([]);
+  const [liked, setLiked] = useState(() => (isUniversal && id ? wish.has(id) : false));
+  const [adding, setAdding] = useState(false);
 
-  // edit UI (owner)
-  const [editMode, setEditMode] = useState(false);
-  const [title, setTitle] = useState("");
-  const [price, setPrice] = useState("");
-  const [currency, setCurrency] = useState("ETB");
-  const [desc, setDesc] = useState("");
-  const [stock, setStock] = useState("1");
-  const [category, setCategory] = useState<string | null>(null);
-
-  const [editImgs, setEditImgs] = useState<
-    (
-      | { kind: "existing"; imageId: string; url: string | null }
-      | { kind: "new"; tempId: string; file: File; previewUrl: string }
-    )[]
-  >([]);
-  const [saving, setSaving] = useState(false);
-  const [saveErr, setSaveErr] = useState<string | null>(null);
-
-  const [dirty, setDirty] = useState(false);
-  const markDirty = () => setDirty(true);
-  function guardLeave(next: () => void) {
-    if (!dirty) {
-      next();
-      return;
-    }
-    const ok = window.confirm(t("confirm_discard_changes"));
-    if (ok) {
-      setDirty(false);
-      next();
-    }
-  }
-
-  /* Load product */
+  /* ---------- Load product & related ---------- */
   useEffect(() => {
     if (!id) return;
     (async () => {
       setLoading(true);
-      setErr(null);
       try {
-        const endpoint =
-          mode === "owner" || mode === "buyer"
-            ? `/shop/${slug}/products/${id}`
-            : `/universal/products/${id}`;
-
-        const r = await api<{ product: Product; images: ProductImage[] }>(endpoint);
+        const endpoint = mode === "buyer" ? `/shop/${slug}/products/${id}` : `/universal/products/${id}`;
+        const r = await api<{ product: Product; images: Product["images"] }>(endpoint);
         setProduct(r.product);
         setImages(r.images || []);
         setIdx(0);
 
-        // prep edit defaults (owner)
-        setTitle(r.product.title || "");
-        setPrice(String(r.product.price ?? ""));
-        setCurrency(r.product.currency || "ETB");
-        setDesc(r.product.description || "");
-        setStock(String(r.product.stock && r.product.stock > 0 ? r.product.stock : 1));
-        setCategory(r.product.categoryId || null);
-
-        setEditImgs(
-          (r.images || []).map((im: ProductImage) => ({
-            kind: "existing" as const,
-            imageId: im.imageId || "",
-            url: im.webUrl ?? im.url ?? null,
-          }))
-        );
-
-        setDirty(false);
-      } catch (e: any) {
-        setErr(e?.message || t("err_load_product_failed"));
+        // Related by category
+        if (r.product.categoryId) {
+          const rel = await api<{ products: Product[] }>(
+            mode === "buyer"
+              ? `/shop/${slug}/categories/${r.product.categoryId}/products`
+              : `/universal/category/${r.product.categoryId}/products`
+          ).catch(() => ({ products: [] as Product[] }));
+          setRelated((rel.products || []).filter((p) => p.id !== id).slice(0, 6));
+        } else {
+          setRelated([]);
+        }
       } finally {
         setLoading(false);
       }
     })();
-  }, [slug, id, t, mode]);
+  }, [id, slug, mode]);
 
-  /* Reorder helper */
-  function moveImage<T>(list: T[], index: number, dir: -1 | 1): T[] {
-    const newIndex = index + dir;
-    if (newIndex < 0 || newIndex >= list.length) return list;
-    const copy = [...list];
-    const tmp = copy[index];
-    copy[index] = copy[newIndex];
-    copy[newIndex] = tmp;
-    return copy;
-  }
-
-  /* Save (owner) */
-  async function handleSaveEdit() {
-    if (mode !== "owner" || !slug || !id) return;
-    setSaving(true);
-    setSaveErr(null);
-
-    if (!title.trim()) {
-      setSaveErr(t("err_title_required"));
-      setSaving(false);
-      return;
-    }
-    const priceNum = Number(price);
-    if (!price.trim() || Number.isNaN(priceNum) || priceNum <= 0) {
-      setSaveErr(t("err_price_gt_zero"));
-      setSaving(false);
-      return;
-    }
-    const stockNum = Number(stock);
-    if (!stock.trim() || Number.isNaN(stockNum) || stockNum <= 0 || !Number.isInteger(stockNum)) {
-      setSaveErr(t("err_stock_integer_gt_zero"));
-      setSaving(false);
-      return;
-    }
-
-    try {
-      const initData = getInitDataRaw();
-
-      // upload newly added images
-      const uploaded: Record<string, string> = {};
-      for (const im of editImgs) {
-        if (im.kind === "new") {
-          const fd = new FormData();
-          fd.append("file", im.file);
-          const up = await fetch("/api/uploads/image", {
-            method: "POST",
-            headers: initData ? { Authorization: `tma ${initData}` } : undefined,
-            body: fd,
-          });
-          if (!up.ok) throw new Error("image_upload_failed");
-          const json = await up.json();
-          uploaded[im.tempId] = json.imageId;
-        }
-      }
-
-      const imageIds: string[] = [];
-      for (const im of editImgs) {
-        if (im.kind === "existing") {
-          if (im.imageId) imageIds.push(im.imageId);
-        } else {
-          const newId = uploaded[im.tempId];
-          if (newId) imageIds.push(newId);
-        }
-      }
-
-      await api(`/shop/${slug}/products/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: title.trim(),
-          price: priceNum,
-          currency,
-          description: desc.trim() ? desc.trim() : null,
-          stock: stockNum,
-          categoryId: category,
-          imageIds,
-        }),
-      });
-
-      // refresh view after save
-      const r = await api<{ product: Product; images: ProductImage[] }>(`/shop/${slug}/products/${id}`);
-      setProduct(r.product);
-      setImages(r.images || []);
-      setIdx(0);
-      setEditImgs(
-        (r.images || []).map((im: ProductImage) => ({
-          kind: "existing" as const,
-          imageId: im.imageId || "",
-          url: im.webUrl ?? im.url ?? null,
-        }))
-      );
-
-      // ✅ critical: saved state, no prompt on back
-      setDirty(false);
-      setEditMode(false);
-    } catch (e: any) {
-      setSaveErr(e?.message || t("err_save_failed"));
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  /* Buyer / Universal actions (simple placeholders) */
+  /* ---------- Actions ---------- */
   const tg = getTelegramWebApp();
+
   const callShop = () => {
-    if (!product?.tenant?.publicPhone) return;
-    window.location.href = `tel:${product.tenant.publicPhone}`;
+    if (product?.tenant?.publicPhone) {
+      window.location.href = `tel:${product.tenant.publicPhone}`;
+    }
   };
-  const addToCart = () => {
-    // TODO: wire to your cart
-    nav("/cart");
-  };
-  const addToFavorite = () => {
-    // TODO: favorites
-  };
+
   const messageShop = () => {
     if (!product?.tenant?.id) return;
     const BOT_USERNAME = import.meta.env.VITE_BOT_USERNAME as string;
@@ -252,534 +99,203 @@ export default function ProductDetail() {
     else window.open(link, "_blank");
   };
 
-  /* View helpers */
+  const toggleFavorite = () => {
+    if (!product) return;
+    const now = wish.toggle({
+      id: product.id,
+      title: product.title,
+      price: product.price ?? null,
+      currency: product.currency ?? null,
+      image: product.photoUrl ?? null,
+      tenantName: product.tenant?.name ?? null,
+    });
+    setLiked(now);
+  };
+
+  const addToCart = async () => {
+    if (mode !== "buyer" || !id) return;
+    try {
+      setAdding(true);
+      await addItem(id, 1, { tenantSlug: slug }); // backend call with tenant
+      optimisticBumpCart(1);
+      refreshCartCount(slug);
+      if (tg && typeof (tg as any).showPopup === "function") {
+        (tg as any).showPopup(
+          { title: "Cart", message: "Added to cart!", buttons: [{ id: "ok", type: "default", text: "OK" }] },
+          () => {}
+        );
+      }
+    } catch (err) {
+      if (tg && typeof (tg as any).showPopup === "function") {
+        (tg as any).showPopup(
+          { title: "Cart", message: "Failed to add. Please try again.", buttons: [{ id: "ok", type: "default", text: "OK" }] },
+          () => {}
+        );
+      } else {
+        alert("Failed to add to cart. Please try again.");
+      }
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  /* ---------- View helpers ---------- */
   const hasImages = images && images.length > 0;
   const currentImg = hasImages ? images[idx] : null;
-  const imgFallback =
-    product?.images?.[0]?.webUrl ||
-    product?.images?.[0]?.url ||
-    product?.photoUrl ||
-    null;
+  const imgUrl = currentImg?.webUrl || currentImg?.url || product?.photoUrl || "/placeholder.png";
 
   return (
-    <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
-      {/* Sticky header */}
-      <div
-        style={{
-          position: "sticky",
-          top: 0,
-          zIndex: 20,
-          background: "#fff",
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          paddingBottom: 6,
-        }}
-      >
-        <button
-          onClick={() =>
-            guardLeave(() => {
-              const fallback =
-                mode === "buyer"
-                  ? slug
-                    ? `/s/${slug}`
-                    : "/joined"
-                  : slug
-                  ? `/shop/${slug}`
-                  : "/";
-              nav(fallback, { replace: true });
-            })
-          }
-          style={{ border: "1px solid #ddd", borderRadius: 999, width: 28, height: 28, background: "#fff" }}
-          aria-label={t("aria_back")}
-        >
-          ←
-        </button>
+    <div style={{ background: "#f9f9f9", minHeight: "100vh" }}>
+      {/* Use global header (shows ♥ or 🛒 count based on route and does smart back) */}
+      <HeaderBar title={product?.title || t("title_product") || "Product"} />
 
-        <h2
-          style={{
-            margin: 0,
-            fontSize: 16,
-            textAlign: "center",
-            flex: 1,
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-          }}
-        >
-          {product ? product.title : t("title_product")}
-        </h2>
-
-        {mode === "owner" && (
-          <button
-            onClick={() => {
-              if (!editMode) {
-                // opening edit: start clean (no prompt on immediate back)
-                setEditMode(true);
-                setDirty(false);
-              } else {
-                // closing edit: respect unsaved changes
-                guardLeave(() => setEditMode(false));
-              }
-            }}
-            style={smallBtn}
-          >
-            {editMode ? t("btn_close") : t("btn_edit")}
-          </button>
-        )}
-      </div>
-
-      {/* Body */}
-      {loading ? (
-        <div>{t("msg_loading")}</div>
-      ) : err ? (
-        <div style={{ color: "crimson" }}>{err}</div>
-      ) : !product ? (
-        <div>{t("msg_not_found")}</div>
-      ) : (
-        <>
-          {/* Gallery */}
-          <div style={{ position: "relative" }}>
-            <div
-              style={{
-                width: "100%",
-                height: 210,
-                borderRadius: 12,
-                background: "#eee",
-                backgroundImage: currentImg?.webUrl
-                  ? `url(${currentImg.webUrl})`
-                  : imgFallback
-                  ? `url(${imgFallback})`
-                  : undefined,
-                backgroundSize: "cover",
-                backgroundPosition: "center",
-              }}
-            />
-            {hasImages && images.length > 1 ? (
-              <>
-                <button
-                  style={galleryBtnLeft}
-                  onClick={() => setIdx((old) => (old - 1 + images.length) % images.length)}
-                  aria-label={t("aria_prev_image")}
-                >
-                  ‹
-                </button>
-                <button
-                  style={galleryBtnRight}
-                  onClick={() => setIdx((old) => (old + 1) % images.length)}
-                  aria-label={t("aria_next_image")}
-                >
-                  ›
-                </button>
-              </>
-            ) : null}
-
-            {/* thumbs */}
-            {hasImages ? (
-              <div style={{ display: "flex", justifyContent: "center", gap: 6, marginTop: 10 }}>
-                {images.map((im, i) => (
-                  <div
-                    key={i}
-                    onClick={() => setIdx(i)}
-                    style={{
-                      width: 36,
-                      height: 36,
-                      borderRadius: 8,
-                      background: "#ddd",
-                      backgroundImage: im.webUrl ? `url(${im.webUrl})` : undefined,
-                      backgroundSize: "cover",
-                      backgroundPosition: "center",
-                      border: i === idx ? "2px solid #000" : "1px solid rgba(0,0,0,.1)",
-                      cursor: "pointer",
-                    }}
-                    aria-label={t("aria_thumb_image", { index: i + 1 })}
-                  />
-                ))}
-              </div>
-            ) : null}
-          </div>
-
-          {/* Owner edit vs read-only */}
-          {mode === "owner" && editMode ? (
-            <div
-              style={{
-                border: "1px solid rgba(0,0,0,.05)",
-                borderRadius: 12,
-                padding: 12,
-                display: "grid",
-                gap: 8,
-                background: "#fff",
-              }}
-            >
-              {saveErr ? <div style={{ color: "crimson" }}>{saveErr}</div> : null}
-
-              <input
-                value={title}
-                onChange={(e) => {
-                  setTitle(e.target.value);
-                  markDirty();
-                }}
-                style={input}
-                placeholder={t("ph_title")}
-                required
-              />
-
-              <div style={{ display: "flex", gap: 8 }}>
-                <input
-                  value={price}
-                  onChange={(e) => {
-                    setPrice(e.target.value);
-                    markDirty();
-                  }}
-                  style={{ ...input, flex: 1 }}
-                  placeholder={t("ph_price")}
-                  type="number"
-                  min={1}
-                  step={1}
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                />
-                <select
-                  value={currency}
-                  onChange={(e) => {
-                    setCurrency(e.target.value);
-                    markDirty();
-                  }}
-                  style={{ ...input, flexBasis: 110 }}
-                >
-                  <option value="ETB">ETB</option>
-                  <option value="USD">USD</option>
-                </select>
-              </div>
-
-              {/* Category */}
-              <CategoryCascader
-                value={category}
-                onChange={(id) => {
-                  setCategory(id);
-                  markDirty();
+      <div style={{ paddingBottom: 40 }}>
+        {loading || !product ? (
+          <div style={{ padding: 20 }}>{t("msg_loading")}</div>
+        ) : (
+          <>
+            {/* ---------- IMAGE ---------- */}
+            <div style={{ width: "100%", background: "#fafafa", padding: 8 }}>
+              <div
+                style={{
+                  width: "100%",
+                  height: 260,
+                  borderRadius: 12,
+                  backgroundImage: `url(${imgUrl})`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
                 }}
               />
-
-              <textarea
-                value={desc}
-                onChange={(e) => {
-                  setDesc(e.target.value);
-                  markDirty();
-                }}
-                style={{ ...input, minHeight: 60 }}
-                placeholder={t("ph_description")}
-              />
-
-              <input
-                value={stock}
-                onChange={(e) => {
-                  setStock(e.target.value);
-                  markDirty();
-                }}
-                style={input}
-                placeholder={t("ph_stock_units")}
-                type="number"
-                min={1}
-                step={1}
-                inputMode="numeric"
-                pattern="[0-9]*"
-              />
-
-              {/* images edit */}
-              <div>
-                <label style={{ fontSize: 13, fontWeight: 500, display: "block", marginBottom: 4 }}>
-                  {t("label_images_existing_new")}
-                </label>
-
-                <input
-                  id="product-detail-images-input"
-                  type="file"
-                  accept="image/*"
-                  multiple
-                  onChange={(e) => {
-                    const files = e.target.files ? Array.from(e.target.files) : [];
-                    if (!files.length) return;
-                    setEditImgs((prev) => [
-                      ...prev,
-                      ...files.map((file) => ({
-                        kind: "new" as const,
-                        tempId: Math.random().toString(36).slice(2),
-                        file,
-                        previewUrl: URL.createObjectURL(file),
-                      })),
-                    ]);
-                    markDirty();
-                    e.target.value = "";
-                  }}
-                  style={{ display: "none" }}
-                />
-
-                <button
-                  type="button"
-                  onClick={() => document.getElementById("product-detail-images-input")?.click()}
-                  style={{ ...input, background: "#fafafa", textAlign: "center", cursor: "pointer" }}
-                >
-                  {t("btn_choose_images")}
-                </button>
-
-                <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4 }}>
-                  {editImgs.length === 0
-                    ? t("msg_no_images_selected")
-                    : editImgs.length === 1
-                    ? t("msg_one_image_selected")
-                    : t("msg_many_images_selected", { count: editImgs.length })}
+              {hasImages && images.length > 1 && (
+                <div style={{ textAlign: "center", marginTop: 8 }}>
+                  {images.map((_, i) => (
+                    <span
+                      key={i}
+                      onClick={() => setIdx(i)}
+                      style={{
+                        display: "inline-block",
+                        width: 8,
+                        height: 8,
+                        margin: "0 3px",
+                        borderRadius: 999,
+                        background: i === idx ? "#000" : "#ccc",
+                        cursor: "pointer",
+                      }}
+                    />
+                  ))}
                 </div>
+              )}
+            </div>
 
-                {editImgs.length > 0 ? (
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-                    {editImgs.map((im, index) => {
-                      const isCover = index === 0;
-                      const url = im.kind === "existing" ? im.url : im.previewUrl;
-                      return (
-                        <div
-                          key={im.kind === "existing" ? im.imageId : im.tempId}
-                          style={{
-                            width: 62,
-                            height: 62,
-                            borderRadius: 8,
-                            backgroundImage: url ? `url(${url})` : undefined,
-                            backgroundSize: "cover",
-                            backgroundPosition: "center",
-                            position: "relative",
-                            border: isCover ? "2px solid #000" : "1px solid rgba(0,0,0,.1)",
-                          }}
-                        >
-                          <button
-                            onClick={() => {
-                              setEditImgs((prev) => prev.filter((_, i) => i !== index));
-                              markDirty();
-                            }}
-                            style={thumbDeleteBtn}
-                            aria-label={t("aria_remove_image")}
-                          >
-                            ×
-                          </button>
-                          {!isCover ? (
-                            <button
-                              onClick={() => {
-                                setEditImgs((prev) => {
-                                  const copy = [...prev];
-                                  const [item] = copy.splice(index, 1);
-                                  copy.unshift(item);
-                                  return copy;
-                                });
-                                markDirty();
-                              }}
-                              style={thumbCoverBtn}
-                            >
-                              ★
-                            </button>
-                          ) : (
-                            <div style={thumbCoverTag}>{t("tag_cover")}</div>
-                          )}
-                          <div style={thumbMoveRow}>
-                            <button
-                              onClick={() => {
-                                setEditImgs((prev) => moveImage(prev, index, -1));
-                                markDirty();
-                              }}
-                              style={thumbMoveBtn}
-                              aria-label={t("aria_move_image_up")}
-                            >
-                              ↑
-                            </button>
-                            <button
-                              onClick={() => {
-                                setEditImgs((prev) => moveImage(prev, index, +1));
-                                markDirty();
-                              }}
-                              style={thumbMoveBtn}
-                              aria-label={t("aria_move_image_down")}
-                            >
-                              ↓
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : null}
-              </div>
-
-              <div style={{ display: "flex", gap: 8, marginTop: 28 }}>
-                <button onClick={handleSaveEdit} disabled={saving} style={btn}>
-                  {saving ? t("btn_saving") : t("btn_save_changes")}
-                </button>
-                <button onClick={() => guardLeave(() => setEditMode(false))} style={smallBtn}>
-                  {t("btn_cancel")}
-                </button>
+            {/* ---------- NAME & PRICE ---------- */}
+            <div style={{ padding: "16px 20px" }}>
+              <h2 style={{ fontSize: 18, margin: 0 }}>{product.title}</h2>
+              <div style={{ fontWeight: 600, fontSize: 16, marginTop: 6 }}>
+                {product.price} {product.currency}
               </div>
             </div>
-          ) : (
-            <>
-              {/* view mode (all) */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <div style={{ fontWeight: 600, fontSize: 16 }}>
-                  {product.price} {product.currency}
-                </div>
-                <div style={{ fontSize: 13, opacity: 0.6 }}>
-                  {t("label_stock_short")}: {product.stock ?? 0}
-                </div>
-                {product.description ? (
-                  <div style={{ fontSize: 13, lineHeight: 1.5 }}>{product.description}</div>
+
+            {/* ---------- ACTION ROW (☎, 💬, ♥ / 🛒) ---------- */}
+            <div style={{ position: "sticky", top: 56, zIndex: 10, padding: "10px 16px", background: "#fff" }}>
+              <div style={actionRow}>
+                <button style={actionBtnBox} onClick={callShop}>☎️</button>
+                <button style={actionBtnBox} onClick={messageShop}>💬</button>
+                {mode === "universal" ? (
+                  <button
+                    style={{
+                      ...actionBtnBox,
+                      fontSize: 24,
+                      color: liked ? "#e11d48" : "#c5c7ce",
+                      lineHeight: 1,
+                    }}
+                    aria-pressed={liked}
+                    onClick={toggleFavorite}
+                    title={liked ? "Remove from favorites" : "Add to favorites"}
+                  >
+                    {liked ? "♥" : "♡"}
+                  </button>
                 ) : (
-                  <div style={{ fontSize: 12, opacity: 0.5 }}>{t("msg_no_description")}</div>
+                  <button
+                    style={{ ...actionBtnBox, opacity: adding ? 0.6 : 1 }}
+                    onClick={addToCart}
+                    disabled={adding}
+                    title="Add to cart"
+                  >
+                    🛒
+                  </button>
                 )}
               </div>
+            </div>
 
-              {/* Buyer actions */}
-              {mode === "buyer" && (
-                <div style={{ marginTop: 16 }}>
-                  <button style={btn} onClick={addToCart}>
-                    {t("btn_add_to_cart") || "Add to Cart"}
-                  </button>
-                  {product?.tenant?.publicPhone && (
-                    <button style={{ ...smallBtn, width: "100%", marginTop: 6 }} onClick={callShop}>
-                      {t("btn_call_shop") || "Call"}
-                    </button>
-                  )}
-                </div>
-              )}
+            {/* ---------- DESCRIPTION ---------- */}
+            <div style={{ padding: "20px 20px" }}>
+              <h3 style={{ fontSize: 15, marginBottom: 8 }}>{t("label_description") || "Description"}</h3>
+              <p style={{ fontSize: 13, color: "#333", lineHeight: 1.6 }}>
+                {product.description || t("msg_no_description")}
+              </p>
+            </div>
 
-              {/* Universal actions */}
-              {isUniversal && (
-                <div style={{ marginTop: 16, display: "flex", gap: 8 }}>
-                  <button style={{ ...smallBtn, flex: 1 }} onClick={addToFavorite}>
-                    ♥ {t("btn_favorite") || "Favorite"}
-                  </button>
-                  <button style={{ ...btn, flex: 1 }} onClick={messageShop}>
-                    {t("btn_message") || "Message"}
-                  </button>
-                  {product?.tenant?.publicPhone && (
-                    <button style={{ ...smallBtn, flex: 1 }} onClick={callShop}>
-                      {t("btn_call") || "Call"}
-                    </button>
-                  )}
+            {/* ---------- RELATED ---------- */}
+            {related.length > 0 && (
+              <div style={{ padding: "0 20px 40px" }}>
+                <h3 style={{ fontSize: 15, marginBottom: 12 }}>{t("label_related") || "You may also like"}</h3>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
+                    gap: 10,
+                  }}
+                >
+                  {related.map((p) => (
+                    <div
+                      key={p.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (mode === "buyer") nav(`/s/${slug}/p/${p.id}`);
+                        else nav(`/universal/p/${p.id}`);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          if (mode === "buyer") nav(`/s/${slug}/p/${p.id}`);
+                          else nav(`/universal/p/${p.id}`);
+                        }
+                      }}
+                      style={{ cursor: "pointer" }}
+                    >
+                      <ProductCard p={p} mode={mode} />
+                    </div>
+                  ))}
                 </div>
-              )}
-            </>
-          )}
-        </>
-      )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
 
 /* ---------- Styles ---------- */
-const smallBtn: React.CSSProperties = {
+const actionRow: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 10,
+};
+
+const actionBtnBox: React.CSSProperties = {
+  flex: 1,
+  height: 42,                // equal height for all three
   border: "1px solid rgba(0,0,0,.1)",
   background: "#fff",
-  borderRadius: 10,
-  padding: "5px 10px",
-  fontSize: 12,
+  borderRadius: 12,
+  fontSize: 15,
+  fontWeight: 500,
+  textAlign: "center",
   cursor: "pointer",
-};
-
-const input: React.CSSProperties = {
-  border: "1px solid rgba(0,0,0,.08)",
-  borderRadius: 8,
-  padding: "7px 9px",
-  fontSize: 14,
-};
-
-const btn: React.CSSProperties = {
-  background: "#000",
-  color: "#fff",
-  border: "none",
-  borderRadius: 8,
-  padding: "8px 12px",
-  fontSize: 14,
-  cursor: "pointer",
-};
-
-const galleryBtnLeft: React.CSSProperties = {
-  position: "absolute",
-  top: "50%",
-  left: 6,
-  transform: "translateY(-50%)",
-  border: "none",
-  background: "rgba(0,0,0,.5)",
-  color: "#fff",
-  width: 28,
-  height: 28,
-  borderRadius: 999,
-  cursor: "pointer",
-};
-
-const galleryBtnRight: React.CSSProperties = {
-  position: "absolute",
-  top: "50%",
-  right: 6,
-  transform: "translateY(-50%)",
-  border: "none",
-  background: "rgba(0,0,0,.5)",
-  color: "#fff",
-  width: 28,
-  height: 28,
-  borderRadius: 999,
-  cursor: "pointer",
-};
-
-const thumbDeleteBtn: React.CSSProperties = {
-  position: "absolute",
-  top: -6,
-  right: -6,
-  width: 20,
-  height: 20,
-  borderRadius: 999,
-  border: "none",
-  background: "rgba(0,0,0,.6)",
-  color: "#fff",
-  fontSize: 11,
-  cursor: "pointer",
-};
-
-const thumbCoverBtn: React.CSSProperties = {
-  position: "absolute",
-  top: -6,
-  left: -6,
-  width: 20,
-  height: 20,
-  borderRadius: 999,
-  border: "none",
-  background: "rgba(255,165,0,.95)",
-  color: "#fff",
-  fontSize: 11,
-  cursor: "pointer",
-};
-
-const thumbCoverTag: React.CSSProperties = {
-  position: "absolute",
-  top: -6,
-  left: -6,
-  background: "#000",
-  color: "#fff",
-  fontSize: 10,
-  padding: "1px 6px",
-  borderRadius: 999,
-};
-
-const thumbMoveRow: React.CSSProperties = {
-  position: "absolute",
-  bottom: -18,
-  left: "50%",
-  transform: "translateX(-50%)",
-  display: "flex",
-  gap: 4,
-};
-
-const thumbMoveBtn: React.CSSProperties = {
-  border: "none",
-  background: "rgba(255,255,255,.8)",
-  borderRadius: 6,
-  fontSize: 10,
-  width: 20,
-  height: 16,
-  cursor: "pointer",
+  boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
 };

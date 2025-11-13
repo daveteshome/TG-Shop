@@ -1,10 +1,10 @@
 // apps/webapp/src/components/layout/HeaderBar.tsx
 import React from "react";
-import { useLocation, useNavigate, Link } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useWishlistCount } from "../../lib/wishlist";
 import { useCartCount, refreshCartCount } from "../../lib/store";
-
+import SearchBox from "../../components/search/SearchBox";
 
 type Props = {
   onOpenMenu?: () => void;
@@ -13,6 +13,14 @@ type Props = {
   onCartClick?: () => void;
   rightOverride?: React.ReactNode;
 };
+
+/** Resolve the in-app routed path regardless of BrowserRouter vs HashRouter and Telegram /tma prefix */
+function routedPath(loc: ReturnType<typeof useLocation>): string {
+  const hash = loc.hash || "";
+  const hashPath = hash.startsWith("#/") ? hash.slice(1) : null; // "#/s/..." -> "/s/..."
+  const base = hashPath ?? loc.pathname;
+  return base.replace(/^\/tma(?=\/|$)/, "") || "/";
+}
 
 function FavoriteHeaderButton() {
   const n = useWishlistCount();
@@ -58,13 +66,12 @@ function CartHeaderButton() {
   const nav = useNavigate();
   const loc = useLocation();
 
-  // Detect buyer route: /s/:slug/*
-  const m = loc.pathname.match(/^\/s\/([^/]+)/);
+  const path = routedPath(loc);
+  const m = path.match(/^\/s\/([^/]+)/);
   const slug = m?.[1];
 
   React.useEffect(() => {
-    // initial fetch for this context
-    refreshCartCount(slug);
+    refreshCartCount(slug || undefined);
   }, [slug]);
 
   const to = slug ? `/s/${slug}/cart` : "/cart";
@@ -115,25 +122,64 @@ export default function HeaderBar({
   const loc = useLocation();
   const nav = useNavigate();
 
-  const path = loc.pathname;
+  const path = routedPath(loc);
 
-  // --- Context detection ---
-  const isUniversalHome = path === "/" || path === "/universal";
-  const isOwnerShopHome = /^\/shop\/[^/]+$/.test(path);
-  const isBuyerShopHome = /^\/s\/[^/]+$/.test(path);
-  const isMyShopHome = path === "/shops" || path === "/my";
-
+  // Section detection on normalized path
+  const isUniversalSection = path === "/" || path.startsWith("/universal");
   const inOwnerShop = path.startsWith("/shop/");
   const inBuyerShop = path.startsWith("/s/");
   const inShop = inOwnerShop || inBuyerShop;
 
-  const slug = inShop ? path.split("/")[2] : null;
-  const isRootLike =
-    isUniversalHome || isOwnerShopHome || isBuyerShopHome || isMyShopHome;
+  // Root-like for showing/hiding back button
+  const isUniversalHome = path === "/" || path === "/universal";
+  const isOwnerShopHome = /^\/shop\/[^/]+$/.test(path);
+  const isBuyerShopHome = /^\/s\/[^/]+$/.test(path);
+  const isMyShopHome = path === "/shops" || path === "/my";
+  const isRootLike = isUniversalHome || isOwnerShopHome || isBuyerShopHome || isMyShopHome;
 
+  const slug = inShop ? path.split("/")[2] : null;
   const showBack = !isRootLike;
 
-  // --- Render ---
+  // Smart back: prefer real history; otherwise compute fallback per route
+  function smartBack() {
+    if (window.history.length > 1) {
+      nav(-1);
+      return;
+    }
+
+    // /universal/p/:id → last universal (or /universal)
+    if (/^\/universal\/p\/[^/]+/.test(path)) {
+      const lastUniversal = localStorage.getItem("tgshop:lastUniversalPage") || "/universal";
+      nav(lastUniversal, { replace: true });
+      return;
+    }
+
+    // /s/:slug/p/:id → last shop (or /s/:slug)
+    {
+      const m = path.match(/^\/s\/([^/]+)\/p\/[^/]+/);
+      if (m) {
+        const s = m[1];
+        const lastShop = localStorage.getItem("tgshop:lastShopPage");
+        nav(lastShop || `/s/${s}`, { replace: true });
+        return;
+      }
+    }
+
+    // /shop/:slug/p/:id → last owner shop (or /shop/:slug)
+    {
+      const m = path.match(/^\/shop\/([^/]+)\/p\/[^/]+/);
+      if (m) {
+        const s = m[1];
+        const lastOwner = localStorage.getItem("tgshop:lastOwnerShopPage");
+        nav(lastOwner || `/shop/${s}`, { replace: true });
+        return;
+      }
+    }
+
+    // Generic fallback
+    nav("/universal", { replace: true });
+  }
+
   return (
     <header
       style={{
@@ -153,70 +199,55 @@ export default function HeaderBar({
           padding: "0 12px",
         }}
       >
-        {/* ← Back only on non-root pages */}
         {showBack ? (
-          <button
-            aria-label="Back"
-            onClick={() => nav(-1)}
-            style={iconBtn}
-          >
+          <button aria-label="Back" onClick={smartBack} style={iconBtn}>
             ←
           </button>
         ) : (
           <button
             onClick={onTitleClick}
-            style={{
-              ...iconBtn,
-              visibility: onTitleClick ? "visible" : "hidden",
-            }}
+            style={{ ...iconBtn, visibility: onTitleClick ? "visible" : "hidden" }}
             aria-label="Title action"
           >
             {title === "←" ? "←" : "·"}
           </button>
         )}
 
-        {/* 🔍 Search bar */}
+        {/* Scoped Search */}
         <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
-          <div
-            style={{
-              flex: 1,
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "10px 12px",
-              background: "#f5f7fb",
-              border: "1px solid #eef2f7",
-              borderRadius: 12,
-            }}
-          >
+          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, padding: "10px 12px" }}>
             <span style={{ opacity: 0.6 }}>🔎</span>
-            <input
-              placeholder={
-                isUniversalHome
-                  ? t("search_global_placeholder", "Search products or shops…")
-                  : inShop
-                  ? t("search_shop_placeholder", "Search in this shop…")
-                  : t("search_placeholder", "Search…")
-              }
-              style={{
-                border: "none",
-                outline: "none",
-                background: "transparent",
-                width: "100%",
-                fontSize: 14,
-              }}
-            />
+            <div style={{ flex: 1 }}>
+              <SearchBox
+                scope={(window as any).__tgshopSearchScope || "universal"}
+                tenantSlug={(window as any).__tgshopSearchTenantSlug || undefined}
+                placeholder={(window as any).__tgshopSearchPlaceholder || "Search…"}
+                onSubmit={(q) => {
+                  const base = (window as any).__tgshopSearchBasePath || "/universal/search";
+                  nav(`${base}?q=${encodeURIComponent(q)}`);
+                }}
+                onSelectItem={(it) => {
+                  const scope = (window as any).__tgshopSearchScope || "universal";
+                  const tslug = (window as any).__tgshopSearchTenantSlug;
+                  if (scope === "universal") nav(`/universal/p/${it.id}`);
+                  else if (scope === "buyer" && tslug) nav(`/s/${tslug}/p/${it.id}`);
+                  else if (scope === "owner" && tslug) nav(`/shop/${tslug}/p/${it.id}`);
+                  else {
+                    const base = (window as any).__tgshopSearchBasePath || "/universal/search";
+                    nav(`${base}?q=${encodeURIComponent(it.title || "")}`);
+                  }
+                }}
+              />
+            </div>
           </div>
         </div>
 
-        {/* ❤️ or 🛒 on right side */}
+        {/* Right side: favorites in universal, cart in buyer */}
         {rightOverride ? (
           rightOverride
-        ) : isUniversalHome ? (
-          // Universal home → show Favorites with live badge
+        ) : isUniversalSection ? (
           <FavoriteHeaderButton />
-        ) : inShop && slug ? (
-          // Shop pages (owner or buyer) → show Cart
+        ) : inBuyerShop ? (
           <CartHeaderButton />
         ) : (
           <span style={{ ...iconBtn, visibility: "hidden" }} />

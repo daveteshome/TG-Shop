@@ -4,6 +4,8 @@ import { api } from "../lib/api/index";
 import ShopCategoryFilterGridIdentical from "../components/shop/ShopCategoryFilterGridIdentical";
 import { ProductCard } from "../components/product/ProductCard";
 import { useWishlistCount } from "../lib/wishlist";
+import SearchBox from "../components/search/SearchBox";
+
 
 type UiProduct = {
   id: string;
@@ -26,6 +28,19 @@ type UniversalResp = {
 
 export default function Universal() {
   const nav = useNavigate();
+
+  // Tell the header to use universal scope
+useEffect(() => {
+  window.dispatchEvent(new CustomEvent("tgshop:search-config", {
+    detail: {
+      scope: "universal",
+      tenantSlug: null,
+      placeholder: "Search everything…",
+      basePath: "/universal/search",
+    },
+  }));
+}, []);
+
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);

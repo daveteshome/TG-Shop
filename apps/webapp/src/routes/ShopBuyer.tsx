@@ -1,8 +1,9 @@
 // apps/webapp/src/routes/ShopBuyer.tsx
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
 import { api } from "../lib/api/index";
 import { ProductCard } from "../components/product/ProductCard";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
+
 
 import type { Product as UiProduct } from "../lib/types";
 import type { Product as CardProduct } from "../components/product/ProductCard";
@@ -10,6 +11,8 @@ import ShopCategoryFilterGridIdentical from "../components/shop/ShopCategoryFilt
 import { getTelegramWebApp } from "../lib/telegram";
 import { addItem } from "../lib/api/cart";
 import { optimisticBumpCart } from "../lib/store";
+import SearchBox from "../components/search/SearchBox";
+
 /* ---------- Types ---------- */
 type TenantLite = {
   id: string;
@@ -28,6 +31,24 @@ type CatalogResp = {
 export default function ShopBuyer() {
   const { slug } = useParams<{ slug: string }>();
   const nav = useNavigate();
+
+  const loc = useLocation();
+
+  useEffect(() => {
+    if (!slug) return;
+    // Remember the last buyer-shop page (base path is enough)
+    localStorage.setItem("tgshop:lastShopPage", `/s/${slug}`);
+    // If you want it to track subpaths/filters too, use loc.pathname instead:
+    // localStorage.setItem("tgshop:lastShopPage", loc.pathname);
+  }, [slug, loc.pathname]);
+
+
+  useEffect(() => {
+  if (!slug) return;
+  window.dispatchEvent(new CustomEvent("tgshop:search-config", {
+    detail: { scope: "buyer", tenantSlug: slug, placeholder: "Search in this shop…", basePath: `/joined/${slug}/search` },
+  }));
+}, [slug]);
 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -205,6 +226,7 @@ export default function ShopBuyer() {
       </div>
 
       {/* Unified category grid with recursive behavior */}
+
       <ShopCategoryFilterGridIdentical
         value={activeCatId}
         onChange={(id, allIds) => {
