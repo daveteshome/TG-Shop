@@ -7,9 +7,6 @@ import { money } from "../lib/format";
 import { getCart, patchItem, removeItem } from "../lib/api/cart";
 import { refreshCartCount } from "../lib/store";
 
-const API_BASE = import.meta.env.VITE_API_BASE;
-console.log("[CART] VITE_API_BASE =", import.meta.env.VITE_API_BASE);
-
 type CartLine = {
   itemId: string;
   productId: string;
@@ -17,20 +14,21 @@ type CartLine = {
   unitPrice: number;
   currency: string;
   qty: number;
-  legacyImg: string | null;
+  imageUrl: string | null;
 };
 
 function mapApiItem(i: any): CartLine {
-  // Be lenient to different backend shapes
   const itemId = String(i.itemId ?? i.id);
   const productId = String(i.productId ?? i.product_id ?? i.pid ?? "");
-  const title = String(i.title ?? i.name ?? "");
-  const unitPrice = Number(i.unitPrice ?? i.price ?? 0);
-  const currency = String(i.currency ?? "ETB");
+  const title = String(i.title ?? i.name ?? i.product?.title ?? i.product?.name ?? "");
+  const unitPrice = Number(i.unitPrice ?? i.price ?? i.product?.price ?? 0);
+  const currency = String(i.currency ?? i.product?.currency ?? "ETB");
   const qty = Number(i.qty ?? i.quantity ?? 1);
-  const legacyImg = i.imageUrl ?? i.img ?? null;
 
-  return { itemId, productId, title, unitPrice, currency, qty, legacyImg };
+  // 👇 Comes from CartService.list (imageUrl)
+  const imageUrl = i.imageUrl ?? i.thumbUrl ?? null;
+
+  return { itemId, productId, title, unitPrice, currency, qty, imageUrl };
 }
 
 export default function Cart() {
@@ -44,12 +42,8 @@ export default function Cart() {
   async function load() {
     setErr(null);
     try {
-      console.time("[CART] getCart()");
       const api = await getCart({ tenantSlug: slug });
-      console.timeEnd("[CART] getCart()");
-      console.log("[CART] getCart() raw items =", api?.items);
       const rows: CartLine[] = (api?.items ?? []).map(mapApiItem);
-      console.log("[CART] mapped rows for UI =", rows);
       setItems(rows);
       setCountBadgeFrom(rows);
     } catch (e: any) {
@@ -61,7 +55,6 @@ export default function Cart() {
 
   useEffect(() => {
     void load();
-    // reload when tenant changes (buyer cart per shop)
   }, [slug]);
 
   function setCountBadgeFrom(itemsNow: CartLine[]) {
@@ -69,7 +62,6 @@ export default function Cart() {
     try {
       (window as any).Telegram?.WebApp?.MainButton?.setText?.(`Cart ${count}`);
     } catch {}
-    // Also kick the server-backed count (best-effort)
     try {
       const p = (refreshCartCount as any)?.(slug);
       if (p?.catch) p.catch(() => {});
@@ -77,11 +69,9 @@ export default function Cart() {
   }
 
   async function onInc(line: CartLine) {
-    console.log("[CART] onInc for", line.itemId);
     if (busyId) return;
     setBusyId(line.itemId);
 
-    // optimistic
     const prev = items;
     const optimistic = prev.map((it) =>
       it.itemId === line.itemId ? { ...it, qty: it.qty + 1 } : it
@@ -93,7 +83,6 @@ export default function Cart() {
       await patchItem(line.itemId, +1, { tenantSlug: slug });
       (window as any).Telegram?.WebApp?.HapticFeedback?.impactOccurred?.("light");
 
-      // background sync (no loader)
       getCart({ tenantSlug: slug })
         .then((api) => {
           const rows: CartLine[] = (api?.items ?? []).map(mapApiItem);
@@ -102,7 +91,6 @@ export default function Cart() {
         })
         .catch(() => {});
     } catch {
-      // rollback on failure
       setItems(prev);
       setCountBadgeFrom(prev);
       alert("Couldn't increase quantity. Please try again.");
@@ -112,7 +100,6 @@ export default function Cart() {
   }
 
   async function onDec(line: CartLine) {
-    console.log("[CART] onDec for", line.itemId);
     if (busyId) return;
     setBusyId(line.itemId);
 
@@ -149,7 +136,6 @@ export default function Cart() {
   }
 
   async function onRemove(line: CartLine) {
-    console.log("[CART] onRemove for", line.itemId);
     if (busyId) return;
     setBusyId(line.itemId);
 
@@ -192,8 +178,8 @@ export default function Cart() {
         <>
           <div style={{ display: "grid", gap: 10 }}>
             {items.map((it) => {
-              const src = `${API_BASE}/products/${it.productId}/image`;
-              console.log("[CART] img src for item", it.itemId, "=>", src);
+              const src = it.imageUrl || undefined;
+
               return (
                 <CartRow
                   key={it.itemId}
@@ -202,7 +188,6 @@ export default function Cart() {
                   currency={it.currency}
                   qty={it.qty}
                   imgSrc={src}
-                  legacyImg={it.legacyImg}
                   busy={busyId === it.itemId}
                   onInc={() => onInc(it)}
                   onDec={() => onDec(it)}
@@ -222,50 +207,73 @@ export default function Cart() {
   );
 }
 
-/* ---------- Item row (unchanged styles) ---------- */
+/* ---------- Item row ---------- */
+
+type CartRowProps = {
+  title: string;
+  unitPrice: number;
+  currency: string;
+  qty: number;
+  imgSrc?: string;
+  busy?: boolean;
+  onInc: () => void;
+  onDec: () => void;
+  onRemove: () => void;
+  onOpen?: () => void;
+};
+
 function CartRow({
   title,
   unitPrice,
   currency,
   qty,
   imgSrc,
-  legacyImg,
   busy,
   onInc,
   onDec,
   onRemove,
-}: {
-  title: string;
-  unitPrice: number;
-  currency: string;
-  qty: number;
-  imgSrc: string;
-  legacyImg: string | null;
-  busy: boolean;
-  onInc: () => void;
-  onDec: () => void;
-  onRemove: () => void;
-}) {
-  console.log("[CART IMG] onError..................", imgSrc);
+  onOpen,
+}: CartRowProps) {
   return (
     <div style={row}>
-      <div style={thumbWrap}>
-        <img
-          src={imgSrc}
-          alt={title}
-          style={thumb}
-          onError={(e) => {
-            const el = e.currentTarget as HTMLImageElement;
-            if (legacyImg) el.src = legacyImg;
-            else el.style.visibility = "hidden";
-          }}
-        />
-      </div>
+      <div
+        style={{
+          ...thumbWrap,
+          cursor: onOpen ? "pointer" : undefined,
+          backgroundImage: imgSrc ? `url(${imgSrc})` : undefined,
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+        }}
+        onClick={onOpen}
+        role={onOpen ? "button" : undefined}
+        tabIndex={onOpen ? 0 : -1}
+        onKeyDown={(e) => {
+          if (!onOpen) return;
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onOpen();
+          }
+        }}
+      />
 
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={titleStyle} title={title}>
+        <div
+          style={{ ...titleStyle, cursor: onOpen ? "pointer" : undefined }}
+          title={title}
+          onClick={onOpen}
+          role={onOpen ? "button" : undefined}
+          tabIndex={onOpen ? 0 : -1}
+          onKeyDown={(e) => {
+            if (!onOpen) return;
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onOpen();
+            }
+          }}
+        >
           {title}
         </div>
+
         <div style={{ fontWeight: 700 }}>{money(unitPrice, currency)}</div>
 
         <div style={qtyRow}>
@@ -285,6 +293,9 @@ function CartRow({
   );
 }
 
+
+/* ---------- Styles ---------- */
+
 const row: React.CSSProperties = {
   display: "flex",
   gap: 10,
@@ -294,6 +305,7 @@ const row: React.CSSProperties = {
   background: "var(--tg-theme-bg-color,#fff)",
   alignItems: "center",
 };
+
 const thumbWrap: React.CSSProperties = {
   width: 76,
   height: 76,
@@ -304,7 +316,7 @@ const thumbWrap: React.CSSProperties = {
   display: "grid",
   placeItems: "center",
 };
-const thumb: React.CSSProperties = { width: "100%", height: "100%", objectFit: "cover" };
+
 const titleStyle: React.CSSProperties = {
   fontWeight: 700,
   marginBottom: 4,
@@ -312,7 +324,14 @@ const titleStyle: React.CSSProperties = {
   overflow: "hidden",
   textOverflow: "ellipsis",
 };
-const qtyRow: React.CSSProperties = { display: "flex", alignItems: "center", gap: 6, marginTop: 6 };
+
+const qtyRow: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  marginTop: 6,
+};
+
 const qtyBtn: React.CSSProperties = {
   width: 28,
   height: 28,
@@ -323,7 +342,13 @@ const qtyBtn: React.CSSProperties = {
   lineHeight: "26px",
   textAlign: "center",
 };
-const qtyBadge: React.CSSProperties = { minWidth: 28, textAlign: "center", fontWeight: 700 };
+
+const qtyBadge: React.CSSProperties = {
+  minWidth: 28,
+  textAlign: "center",
+  fontWeight: 700,
+};
+
 const removeBtn: React.CSSProperties = {
   marginLeft: "auto",
   border: "none",
@@ -333,6 +358,7 @@ const removeBtn: React.CSSProperties = {
   textDecoration: "underline",
   cursor: "pointer",
 };
+
 const summary: React.CSSProperties = {
   display: "flex",
   justifyContent: "space-between",

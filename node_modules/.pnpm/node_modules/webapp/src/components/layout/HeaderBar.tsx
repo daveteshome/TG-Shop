@@ -141,7 +141,7 @@ export default function HeaderBar({
   const showBack = !isRootLike;
 
   // Smart back: prefer real history; otherwise compute fallback per route
-  function smartBack() {
+    function smartBack() {
     if (window.history.length > 1) {
       nav(-1);
       return;
@@ -176,9 +176,28 @@ export default function HeaderBar({
       }
     }
 
+    // ⭐ NEW: buyer cart /s/:slug/cart → back to that shop (or its last list page)
+    {
+      const m = path.match(/^\/s\/([^/]+)\/cart$/);
+      if (m) {
+        const s = m[1];
+        const lastShop = localStorage.getItem("tgshop:lastShopPage");
+        nav(lastShop || `/s/${s}`, { replace: true });
+        return;
+      }
+    }
+
+    // ⭐ NEW: global /cart → back to universal list
+    if (path === "/cart") {
+      const lastUniversal = localStorage.getItem("tgshop:lastUniversalPage") || "/universal";
+      nav(lastUniversal, { replace: true });
+      return;
+    }
+
     // Generic fallback
     nav("/universal", { replace: true });
   }
+
 
   return (
     <header

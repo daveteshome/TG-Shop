@@ -1251,6 +1251,76 @@ api.get("/products/:id/image", async (req, res) => {
   }
 });
 
+api.delete("/cart/items/:itemId", async (req: any, res) => {
+  const userId = req.userId!;
+  const slug = getTenantSlugFromReq(req);
+  if (!slug) return res.status(400).json({ error: "tenant_slug_required" });
+
+  const tenantId = await getTenantId(slug);
+  const itemId = req.params.itemId;
+
+  // Ensure item belongs to the same user + tenant
+  const item = await db.cartItem.findFirst({
+    where: { id: itemId },
+    include: { cart: true },
+  });
+
+  if (!item || item.cart.userId !== userId || item.cart.tenantId !== tenantId) {
+    return res.status(404).json({ error: "item_not_found" });
+  }
+
+  // Delete the item
+  await db.cartItem.delete({ where: { id: itemId } });
+
+  // Return updated cart
+  const cart = await CartService.list(userId, tenantId);
+  return res.json(cart || { id: null, userId, items: [] });
+});
+
+
+api.patch("/cart/items/:itemId", async (req: any, res) => {
+  const userId = req.userId!;
+  const slug = getTenantSlugFromReq(req);
+
+  if (!slug) {
+    return res.status(400).json({ error: "tenant_slug_required" });
+  }
+
+  const tenantId = await getTenantId(slug);
+  const itemId = req.params.itemId;
+  const { qtyDelta } = (req.body ?? {}) as { qtyDelta?: number };
+
+  if (!qtyDelta) {
+    return res.status(400).json({ error: "qtyDelta_required" });
+  }
+
+  // Load item and ensure ownership
+  const item = await db.cartItem.findFirst({
+    where: { id: itemId },
+    include: { cart: true },
+  });
+
+  if (!item || item.cart.userId !== userId || item.cart.tenantId !== tenantId) {
+    return res.status(404).json({ error: "item_not_found" });
+  }
+
+  if (qtyDelta > 0) {
+    // increase quantity
+    await CartService.inc(itemId);
+  } else {
+    // qtyDelta < 0
+    if (item.quantity <= 1) {
+      // remove item
+      await db.cartItem.delete({ where: { id: itemId } });
+    } else {
+      // decrease quantity
+      await CartService.dec(itemId);
+    }
+  }
+
+  const cart = await CartService.list(userId, tenantId);
+  return res.json(cart || { id: null, userId, items: [] });
+});
 
 
 // GET /api/cart

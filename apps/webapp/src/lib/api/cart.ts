@@ -17,13 +17,20 @@ export function addItem(productId: string, qty = 1, opt: Opt = {}): Promise<Cart
     body: JSON.stringify({ productId, qty }),
   });
 }
-export function patchItem(itemId: string, qtyDelta: number, opt: Opt = {}): Promise<{ ok: true }> {
-  return api<{ ok: true }>(`/cart/items/${itemId}`, {
+
+// apps/webapp/src/lib/api/cart.ts
+export function patchItem(
+  itemId: string,
+  qtyDelta: number,
+  opt: { tenantSlug?: string } = {}
+) {
+  return api(`/cart/items/${itemId}`, {
     method: "PATCH",
     headers: withTenant({ "Content-Type": "application/json" }, opt.tenantSlug),
     body: JSON.stringify({ qtyDelta }),
   });
 }
+
 export function removeItem(itemId: string, opt: Opt = {}): Promise<{ ok: true }> {
   return api<{ ok: true }>(`/cart/items/${itemId}`, {
     method: "DELETE",
