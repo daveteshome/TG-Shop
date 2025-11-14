@@ -28,7 +28,7 @@ type Product = {
   stock?: number | null;
   categoryId?: string | null;
   photoUrl?: string | null;
-  tenant?: { id?: string; slug?: string; name?: string; publicPhone?: string | null } | null;
+  tenant?: { id?: string; slug?: string; name?: string; publicPhone?: string | null; publicTelegramLink?: string | null } | null;
   images?: Array<{ id?: string; webUrl?: string | null; url?: string | null }>;
 };
 
@@ -36,6 +36,17 @@ type CategoryLite = {
   id: string;
   parentId?: string | null;
 };
+
+
+function normalizeTelegramLink(raw?: string | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  const username = trimmed.startsWith("@") ? trimmed.slice(1) : trimmed;
+  if (!username) return null;
+  return `https://t.me/${username}`;
+}
 
 /* ---------- Category helpers ---------- */
 function buildCategoryIndex(cats: CategoryLite[]) {
@@ -461,21 +472,38 @@ export default function ProductDetail() {
   }, [mode, slug, product]);
 
   /* ---------- Actions ---------- */
-  const tg = getTelegramWebApp();
+const tg = getTelegramWebApp();
 
-  const callShop = () => {
-    if (product?.tenant?.publicPhone) {
-      window.location.href = `tel:${product.tenant.publicPhone}`;
-    }
-  };
+const callShop = () => {
+  const phone = product?.tenant?.publicPhone;
+  if (!phone) return;
+  window.location.href = `tel:${phone}`;
+};
 
-  const messageShop = () => {
-    if (!product?.tenant?.id) return;
+const messageShop = () => {
+  if (!product?.tenant) return;
+
+  const direct = normalizeTelegramLink(product.tenant.publicTelegramLink);
+  const tgApp = getTelegramWebApp();
+
+  let link: string;
+  if (direct) {
+    // ✅ direct chat / channel / group link of the shop owner
+    link = direct;
+  } else if (product.tenant.id) {
+    // fallback → bot deep link with product + tenant
     const BOT_USERNAME = import.meta.env.VITE_BOT_USERNAME as string;
-    const link = `https://t.me/${BOT_USERNAME}?start=product_${product.id}_${product.tenant.id}`;
-    if (tg) tg.openTelegramLink(link);
-    else window.open(link, "_blank");
-  };
+    link = `https://t.me/${BOT_USERNAME}?start=product_${product.id}_${product.tenant.id}`;
+  } else {
+    // last-resort → just open the bot
+    const BOT_USERNAME = import.meta.env.VITE_BOT_USERNAME as string;
+    link = `https://t.me/${BOT_USERNAME}`;
+  }
+
+  if (tgApp) tgApp.openTelegramLink(link);
+  else window.open(link, "_blank");
+};
+
 
   const toggleFavorite = () => {
     if (!product) return;

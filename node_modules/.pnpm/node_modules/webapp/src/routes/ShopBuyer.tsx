@@ -11,7 +11,6 @@ import ShopCategoryFilterGridIdentical from "../components/shop/ShopCategoryFilt
 import { getTelegramWebApp } from "../lib/telegram";
 import { addItem } from "../lib/api/cart";
 import { optimisticBumpCart } from "../lib/store";
-import SearchBox from "../components/search/SearchBox";
 
 /* ---------- Types ---------- */
 type TenantLite = {
@@ -19,6 +18,7 @@ type TenantLite = {
   slug: string;
   name: string;
   publicPhone?: string | null;
+  publicTelegramLink?: string | null; 
 };
 
 type CatalogResp = {
@@ -26,6 +26,36 @@ type CatalogResp = {
   categories: { id: string; title: string; parentId?: string | null }[];
   products: UiProduct[];
 };
+
+function normalizeTelegramLink(raw?: string | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  const username = trimmed.startsWith("@") ? trimmed.slice(1) : trimmed;
+  if (!username) return null;
+  return `https://t.me/${username}`;
+}
+
+function openShopTelegram(opts: {
+  ownerLink?: string | null;
+  tg: ReturnType<typeof getTelegramWebApp> | null;
+}) {
+  const { ownerLink, tg } = opts;
+
+  const direct = normalizeTelegramLink(ownerLink);
+
+  if (!direct) {
+    alert("Shop has no Telegram contact link configured.");
+    return;
+  }
+
+  if (tg && typeof tg.openTelegramLink === "function") {
+    tg.openTelegramLink(direct);
+  } else {
+    window.open(direct, "_blank");
+  }
+}
 
 /* ---------- Component ---------- */
 export default function ShopBuyer() {
@@ -77,6 +107,7 @@ export default function ShopBuyer() {
               slug: t.slug,
               name: t.name,
               publicPhone: t.publicPhone ?? null,
+              publicTelegramLink: t.publicTelegramLink ?? null,
             };
           }
         } catch {}
@@ -206,6 +237,11 @@ export default function ShopBuyer() {
 
   const shopName = catalog.tenant.name;
   const shopPhone = catalog.tenant.publicPhone ?? undefined;
+  const shopTelegram = catalog.tenant.publicTelegramLink ?? null;
+  const tenantId = catalog.tenant.id || null;
+
+const tg = getTelegramWebApp();
+
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -245,6 +281,10 @@ export default function ShopBuyer() {
             null;
           const img = fromRelation || `/api/products/${p.id}/image`;
 
+          const tenantId = catalog.tenant.id;
+          const shopName = catalog.tenant.name;
+          const shopPhone = catalog.tenant.publicPhone ?? undefined;
+
           return (
             <div
               key={p.id}
@@ -265,15 +305,42 @@ export default function ShopBuyer() {
               style={{ cursor: "pointer" }}
             >
               <ProductCard
-                p={p}
-                mode="buyer"
-                image={img}
-                shopName={shopName}
-                shopPhone={shopPhone}
-                onAdd={handleAddToCart}
-              />
+  p={p}
+  mode="buyer"
+  image={img}
+  shopName={shopName}
+  shopPhone={shopPhone}
+  shopTelegram={shopTelegram}   // 👈 NEW
+  onAdd={handleAddToCart}
+  onCall={
+  shopPhone
+    ? () => {
+        const tg = getTelegramWebApp();
+
+        if (tg && typeof tg.openLink === "function") {
+          // ✅ Use Telegram bridge on mobile
+          tg.openLink(`tel:${shopPhone}`);
+        } else {
+          // Fallback for normal browsers
+          window.location.href = `tel:${shopPhone}`;
+        }
+      }
+    : undefined
+}
+
+
+  onMessage={() =>
+    openShopTelegram({
+      ownerLink: shopTelegram,
+      tg,
+    })
+  }
+/>
+
+
             </div>
           );
+
         })}
         {filtered.length === 0 && (
           <div style={{ opacity: 0.6 }}>No products match your search.</div>

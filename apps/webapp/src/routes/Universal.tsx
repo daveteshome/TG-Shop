@@ -1,10 +1,9 @@
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api/index";
 import ShopCategoryFilterGridIdentical from "../components/shop/ShopCategoryFilterGridIdentical";
 import { ProductCard } from "../components/product/ProductCard";
-import { useWishlistCount } from "../lib/wishlist";
-import SearchBox from "../components/search/SearchBox";
+import { getTelegramWebApp } from "../lib/telegram";
 
 
 type UiProduct = {
@@ -15,7 +14,15 @@ type UiProduct = {
   currency?: string | null;
   photoUrl?: string | null;
   categoryId?: string | null;
-  tenant?: { slug?: string; name?: string } | null;
+  tenant?:
+    | {
+        id?: string;
+        slug?: string;
+        name?: string;
+        publicPhone?: string | null;
+        publicTelegramLink?: string | null;
+      }
+    | null;
   images?: { url?: string | null; webUrl?: string | null }[];
 };
 
@@ -25,6 +32,38 @@ type UniversalResp = {
   total: number;
   items: UiProduct[];
 };
+
+function normalizeTelegramLink(raw?: string | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  const username = trimmed.startsWith("@") ? trimmed.slice(1) : trimmed;
+  if (!username) return null;
+  return `https://t.me/${username}`;
+}
+
+function openShopTelegram(opts: {
+  ownerLink?: string | null;
+  tg: ReturnType<typeof getTelegramWebApp> | null;
+}) {
+  const { ownerLink, tg } = opts;
+
+  const direct = normalizeTelegramLink(ownerLink);
+
+  if (!direct) {
+    alert("Shop has no Telegram contact link configured.");
+    return;
+  }
+
+  if (tg && typeof tg.openTelegramLink === "function") {
+    tg.openTelegramLink(direct);
+  } else {
+    window.open(direct, "_blank");
+  }
+}
+
+
 
 export default function Universal() {
   const nav = useNavigate();
@@ -90,6 +129,7 @@ useEffect(() => {
 
     return list;
   }, [products, activeCatIds, q]);
+const tg = getTelegramWebApp();
 
   /* ---------- Render ---------- */
   if (loading) return <div style={{ opacity: 0.7 }}>Loading universal products…</div>;
@@ -124,41 +164,70 @@ useEffect(() => {
           gap: 10,
         }}
       >
-        {filtered.map((p) => {
-          const img =
-            p.images?.[0]?.webUrl ||
-            p.images?.[0]?.url ||
-            p.photoUrl ||
-            `/api/products/${p.id}/image`;
+      {filtered.map((p) => {
+        const img =
+          p.images?.[0]?.webUrl ||
+          p.images?.[0]?.url ||
+          p.photoUrl ||
+          `/api/products/${p.id}/image`;
 
-          return (
-            <div
-              key={p.id}
-              role="button"
-              tabIndex={0}
-              onClick={(e) => {
-                if ((e as any).defaultPrevented) return;
+        const phone = p.tenant?.publicPhone ?? undefined;
+        const telegram = p.tenant?.publicTelegramLink ?? null;
+
+        return (
+          <div
+            key={p.id}
+            role="button"
+            tabIndex={0}
+            onClick={(e) => {
+              if ((e as any).defaultPrevented) return;
+              e.preventDefault();
+              e.stopPropagation();
+              nav(`/universal/p/${p.id}`);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
-                e.stopPropagation();
                 nav(`/universal/p/${p.id}`);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  nav(`/universal/p/${p.id}`);
-                }
-              }}
-              style={{ cursor: "pointer" }}
-            >
-              <ProductCard
-                p={p as any}
-                mode="universal"
-                image={img}
-                shopName={p.tenant?.name}
-              />
-            </div>
-          );
-        })}
+              }
+            }}
+            style={{ cursor: "pointer" }}
+          >
+            <ProductCard
+            p={p as any}
+            mode="universal"
+            image={img}
+            shopName={p.tenant?.name}
+            shopPhone={phone}
+            shopTelegram={telegram}   // 👈 NEW
+            onCall={
+              phone
+                ? () => {
+                    const tg = getTelegramWebApp();
+
+                    if (tg && typeof tg.openLink === "function") {
+                      tg.openLink(`tel:${phone}`);
+                    } else {
+                      window.location.href = `tel:${phone}`;
+                    }
+                  }
+                : undefined
+            }
+
+
+            onMessage={() =>
+              openShopTelegram({
+                ownerLink: telegram,
+                tg,
+              })
+            }
+          />
+
+          </div>
+        );
+      })}
+
+
         {filtered.length === 0 && (
           <div style={{ opacity: 0.6 }}>No products match your search.</div>
         )}
