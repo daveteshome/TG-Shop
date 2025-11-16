@@ -1349,17 +1349,46 @@ api.post("/cart/items", async (req: any, res) => {
   return res.json(cart);
 });
 
+
 // ---------- Checkout / Buy Now ----------
 api.post('/checkout', async (req: any, res) => {
   const userId = req.userId!;
   const { shippingAddress, note } = req.body || {};
+
   try {
-    const order = await OrdersService.checkoutFromCartWithDetails(userId, { shippingAddress, note });
-    res.json(order);
+    // 🔹 Resolve the tenant from slug (same idea as /cart)
+    const slug = getTenantSlugFromReq(req);
+    if (!slug) {
+      return res.status(400).json({ error: 'tenant_slug_required' });
+    }
+
+    const tenantId = await getTenantId(slug);
+
+    // 🔹 Create order using the correct tenant
+    const order = await OrdersService.checkoutFromCartWithDetails(
+      userId,
+      { shippingAddress, note },
+      tenantId, // 👈 pass the tenant override
+    );
+
+    // 🔹 Normalize response to what frontend expects
+    const total =
+      (order.total as any)?.toString
+        ? (order.total as any).toString()
+        : String(order.total);
+
+    res.json({
+      orderId: order.id,
+      shortCode: order.shortCode ?? null,
+      status: order.status,
+      total,
+      currency: order.currency,
+    });
   } catch (e: any) {
     res.status(400).json({ error: e?.message || 'checkout failed' });
   }
 });
+
 
 // Single-item flow but same validations live in OrdersService
 api.post('/buy-now', async (req: any, res) => {
@@ -1381,21 +1410,100 @@ api.post('/buy-now', async (req: any, res) => {
 });
 
 // ---------- Orders ----------
-api.get('/orders', async (req: any, res) => {
-  const userId = req.userId!;
-  const take = int(req.query.take, 20);
-  const orders = await OrdersService.listUserOrders(userId, take);
-  res.json(orders);
+api.get("/orders", async (req: any, res) => {
+  try {
+    const userId = req.userId!;
+
+    // support both ?take= and ?limit=
+    const rawTake =
+      (req.query.take as string | undefined) ??
+      (req.query.limit as string | undefined);
+    const take = int(rawTake, 20);
+
+    // 👇 NEW: tenant_slug → tenantIdOverride
+    const slugRaw = req.query.tenant_slug as string | undefined;
+    const slug = slugRaw && slugRaw.trim() ? slugRaw.trim() : undefined;
+
+    const tenantIdOverride = slug ? await getTenantId(slug) : undefined;
+
+    const orders = await OrdersService.listUserOrders(
+      userId,
+      take,
+      tenantIdOverride
+    );
+
+    // keep old response shape: plain array
+    res.json(orders);
+  } catch (e: any) {
+    console.error("[orders] list error", e);
+    res.status(400).json({ error: e?.message || "orders_failed" });
+  }
 });
 
-api.get('/orders/:id', async (req: any, res) => {
-  const userId = req.userId!;
-  const id = String(req.params.id);
-  const order = await db.order.findUnique({ where: { id, userId }, include: { items: true } });
-  if (!order) return res.status(404).json({ error: 'not found' });
-  res.json(order);
+
+// ---------- Shop Orders (OWNER side) ----------
+api.get("/shop/:slug/orders", resolveTenant, async (req: any, res) => {
+  try {
+    const tenantId = req.tenantId as string;
+    const rawTake =
+      (req.query.take as string | undefined) ??
+      (req.query.limit as string | undefined);
+    const take = int(rawTake, 50);
+
+    // TODO (optional): verify req.userId has OWNER/HELPER role for this tenant
+    // const userId = req.userId!;
+    // const membership = await db.membership.findFirst({ where: { tenantId, userId } });
+    // if (!membership || membership.role !== "OWNER") return res.status(403).json({ error: "forbidden" });
+
+    const orders = await db.order.findMany({
+      where: { tenantId },
+      orderBy: { createdAt: "desc" },
+      take,
+    });
+
+    res.json(orders); // same shape your frontend Order type expects
+  } catch (e: any) {
+    console.error("[shop orders] list error", e);
+    res.status(400).json({ error: e?.message || "shop_orders_failed" });
+  }
 });
 
+api.get("/shop/:slug/orders/:id", resolveTenant, async (req: any, res) => {
+  try {
+    const tenantId = req.tenantId as string;
+    const id = String(req.params.id);
+
+    // Again: this is owner view → filter by tenantId, not by userId
+    const order = await db.order.findFirst({
+      where: { id, tenantId },
+      include: { items: true },
+    });
+
+    if (!order) return res.status(404).json({ error: "not found" });
+
+    res.json(order);
+  } catch (e: any) {
+    console.error("[shop orders] get error", e);
+    res.status(400).json({ error: e?.message || "shop_order_failed" });
+  }
+});
+
+
+api.get("/orders/:id", async (req: any, res) => {
+  try {
+    const userId = req.userId!;
+    const id = String(req.params.id);
+    const order = await db.order.findUnique({
+      where: { id, userId },
+      include: { items: true },
+    });
+    if (!order) return res.status(404).json({ error: "not found" });
+    res.json(order);
+  } catch (e: any) {
+    console.error("[orders] get error", e);
+    res.status(400).json({ error: e?.message || "order_failed" });
+  }
+});
 // ---------- Profile ----------
 api.get('/profile', async (req: any, res) => {
   const userId = req.userId!;

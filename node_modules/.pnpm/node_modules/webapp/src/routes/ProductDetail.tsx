@@ -28,7 +28,15 @@ type Product = {
   stock?: number | null;
   categoryId?: string | null;
   photoUrl?: string | null;
-  tenant?: { id?: string; slug?: string; name?: string; publicPhone?: string | null; publicTelegramLink?: string | null } | null;
+  tenant?:
+    | {
+        id?: string;
+        slug?: string;
+        name?: string;
+        publicPhone?: string | null;
+        publicTelegramLink?: string | null;
+      }
+    | null;
   images?: Array<{ id?: string; webUrl?: string | null; url?: string | null }>;
 };
 
@@ -36,7 +44,6 @@ type CategoryLite = {
   id: string;
   parentId?: string | null;
 };
-
 
 function normalizeTelegramLink(raw?: string | null): string | null {
   if (!raw) return null;
@@ -159,7 +166,9 @@ export default function ProductDetail() {
 
   const [related, setRelated] = useState<Product[]>([]);
   const [exploreMore, setExploreMore] = useState<Product[]>([]);
-  const [liked, setLiked] = useState(() => (isUniversal && id ? wish.has(id) : false));
+  const [liked, setLiked] = useState(
+    () => isUniversal && id ? wish.has(id) : false
+  );
   const [adding, setAdding] = useState(false);
 
   /* ---------- Load main product ---------- */
@@ -170,9 +179,13 @@ export default function ProductDetail() {
       setLoading(true);
       try {
         const endpoint =
-          mode === "buyer" ? `/shop/${slug}/products/${id}` : `/universal/products/${id}`;
+          mode === "buyer"
+            ? `/shop/${slug}/products/${id}`
+            : `/universal/products/${id}`;
 
-        const r = await api<{ product: Product; images: Product["images"] }>(endpoint);
+        const r = await api<{ product: Product; images: Product["images"] }>(
+          endpoint
+        );
 
         setProduct(r.product);
         setImages(r.images || []);
@@ -208,9 +221,9 @@ export default function ProductDetail() {
         if (mode === "buyer") {
           if (!slug) return;
 
-          const catRes: any = await api<any>(`/shop/${slug}/categories/with-counts`).catch(
-            () => null
-          );
+          const catRes: any = await api<any>(
+            `/shop/${slug}/categories/with-counts`
+          ).catch(() => null);
           const catArr =
             catRes == null
               ? []
@@ -301,9 +314,10 @@ export default function ProductDetail() {
               })()
             : [];
 
-        const ancestors = currentCategory && byId.has(currentCategory)
-          ? getAncestors(currentCategory, byId)
-          : [];
+        const ancestors =
+          currentCategory && byId.has(currentCategory)
+            ? getAncestors(currentCategory, byId)
+            : [];
 
         /* ---------- Build RELATED (horizontal) ---------- */
         const relatedCandidates: Product[] = [];
@@ -472,38 +486,37 @@ export default function ProductDetail() {
   }, [mode, slug, product]);
 
   /* ---------- Actions ---------- */
-const tg = getTelegramWebApp();
+  const tg = getTelegramWebApp();
 
-const callShop = () => {
-  const phone = product?.tenant?.publicPhone;
-  if (!phone) return;
-  window.location.href = `tel:${phone}`;
-};
+  const callShop = () => {
+    const phone = product?.tenant?.publicPhone;
+    if (!phone) return;
+    window.location.href = `tel:${phone}`;
+  };
 
-const messageShop = () => {
-  if (!product?.tenant) return;
+  const messageShop = () => {
+    if (!product?.tenant) return;
 
-  const direct = normalizeTelegramLink(product.tenant.publicTelegramLink);
-  const tgApp = getTelegramWebApp();
+    const direct = normalizeTelegramLink(product.tenant.publicTelegramLink);
+    const tgApp = getTelegramWebApp();
 
-  let link: string;
-  if (direct) {
-    // ✅ direct chat / channel / group link of the shop owner
-    link = direct;
-  } else if (product.tenant.id) {
-    // fallback → bot deep link with product + tenant
-    const BOT_USERNAME = import.meta.env.VITE_BOT_USERNAME as string;
-    link = `https://t.me/${BOT_USERNAME}?start=product_${product.id}_${product.tenant.id}`;
-  } else {
-    // last-resort → just open the bot
-    const BOT_USERNAME = import.meta.env.VITE_BOT_USERNAME as string;
-    link = `https://t.me/${BOT_USERNAME}`;
-  }
+    let link: string;
+    if (direct) {
+      // ✅ direct chat / channel / group link of the shop owner
+      link = direct;
+    } else if (product.tenant.id) {
+      // fallback → bot deep link with product + tenant
+      const BOT_USERNAME = import.meta.env.VITE_BOT_USERNAME as string;
+      link = `https://t.me/${BOT_USERNAME}?start=product_${product.id}_${product.tenant.id}`;
+    } else {
+      // last-resort → just open the bot
+      const BOT_USERNAME = import.meta.env.VITE_BOT_USERNAME as string;
+      link = `https://t.me/${BOT_USERNAME}`;
+    }
 
-  if (tgApp) tgApp.openTelegramLink(link);
-  else window.open(link, "_blank");
-};
-
+    if (tgApp) tgApp.openTelegramLink(link);
+    else window.open(link, "_blank");
+  };
 
   const toggleFavorite = () => {
     if (!product) return;
@@ -580,7 +593,11 @@ const messageShop = () => {
   /* ---------- View helpers ---------- */
   const hasImages = images && images.length > 0;
   const currentImg = hasImages ? images[idx] : null;
-  const imgUrl = currentImg?.webUrl || currentImg?.url || product?.photoUrl || "/placeholder.png";
+  const imgUrl =
+    currentImg?.webUrl ||
+    currentImg?.url ||
+    product?.photoUrl ||
+    "/placeholder.png";
 
   const shopName = product?.tenant?.name || undefined;
   const shopPhone = product?.tenant?.publicPhone ?? undefined;
@@ -595,35 +612,83 @@ const messageShop = () => {
           <div style={{ padding: 20 }}>{t("msg_loading")}</div>
         ) : (
           <>
-            {/* ---------- IMAGE ---------- */}
+            {/* ---------- IMAGE GALLERY (aligned with OwnerProductDetail) ---------- */}
             <div style={{ width: "100%", background: "#fafafa", padding: 8 }}>
-              <div
-                style={{
-                  width: "100%",
-                  height: 260,
-                  borderRadius: 12,
-                  backgroundImage: `url(${imgUrl})`,
-                  backgroundSize: "cover",
-                  backgroundPosition: "center",
-                }}
-              />
-              {hasImages && images.length > 1 && (
-                <div style={{ textAlign: "center", marginTop: 8 }}>
-                  {images.map((_, i) => (
-                    <span
-                      key={i}
-                      onClick={() => setIdx(i)}
-                      style={{
-                        display: "inline-block",
-                        width: 8,
-                        height: 8,
-                        margin: "0 3px",
-                        borderRadius: 999,
-                        background: i === idx ? "#000" : "#ccc",
-                        cursor: "pointer",
-                      }}
-                    />
-                  ))}
+              <div style={{ position: "relative" }}>
+                <div
+                  style={{
+                    width: "100%",
+                    height: 260,
+                    borderRadius: 12,
+                    backgroundImage: `url(${imgUrl})`,
+                    backgroundSize: "cover",
+                    backgroundPosition: "center",
+                    backgroundColor: "#eee",
+                  }}
+                />
+
+                {hasImages && images.length > 1 && (
+                  <>
+                    <button
+                      style={galleryBtnLeft}
+                      onClick={() =>
+                        setIdx(
+                          (old) =>
+                            (old - 1 + images.length) % images.length
+                        )
+                      }
+                      aria-label={t("aria_prev_image") || "Previous image"}
+                    >
+                      ‹
+                    </button>
+                    <button
+                      style={galleryBtnRight}
+                      onClick={() =>
+                        setIdx((old) => (old + 1) % images.length)
+                      }
+                      aria-label={t("aria_next_image") || "Next image"}
+                    >
+                      ›
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {/* Thumbnails row (same idea as owner) */}
+              {hasImages && (
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "center",
+                    gap: 6,
+                    marginTop: 10,
+                  }}
+                >
+                  {images.map((im, i) => {
+                    const thumbUrl =
+                      im.webUrl ||
+                      im.url ||
+                      product.photoUrl ||
+                      "/placeholder.png";
+                    return (
+                      <div
+                        key={im.id || i}
+                        onClick={() => setIdx(i)}
+                        style={{
+                          ...galleryThumb,
+                          backgroundImage: `url(${thumbUrl})`,
+                          border:
+                            i === idx
+                              ? "2px solid #000"
+                              : "1px solid rgba(0,0,0,.1)",
+                        }}
+                        aria-label={
+                          t("aria_thumb_image", { index: i + 1 }) ||
+                          `Image ${i + 1}`
+                        }
+                      />
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -663,13 +728,20 @@ const messageShop = () => {
                     }}
                     aria-pressed={liked}
                     onClick={toggleFavorite}
-                    title={liked ? "Remove from favorites" : "Add to favorites"}
+                    title={
+                      liked
+                        ? "Remove from favorites"
+                        : "Add to favorites"
+                    }
                   >
                     {liked ? "♥" : "♡"}
                   </button>
                 ) : (
                   <button
-                    style={{ ...actionBtnBox, opacity: adding ? 0.6 : 1 }}
+                    style={{
+                      ...actionBtnBox,
+                      opacity: adding ? 0.6 : 1,
+                    }}
                     onClick={addToCart}
                     disabled={adding}
                     title="Add to cart"
@@ -690,7 +762,7 @@ const messageShop = () => {
               </p>
             </div>
 
-            {/* ---------- DEBUG PANEL (TEMPORARY) ---------- */}
+            {/* ---------- DEBUG PANEL (currently empty) ---------- */}
             <div
               style={{
                 padding: "8px 20px",
@@ -699,15 +771,16 @@ const messageShop = () => {
                 borderTop: "1px dashed #ddd",
                 marginTop: 4,
               }}
-            >
-            </div>
+            ></div>
 
             {/* ---------- RELATED (HORIZONTAL STRIP) ---------- */}
             {related.length > 0 && (
               <div style={{ padding: "8px 20px 24px" }}>
                 <h3 style={{ fontSize: 15, marginBottom: 12 }}>
                   {t("label_related") ||
-                    (mode === "buyer" ? "Similar products" : "Similar items")}
+                    (mode === "buyer"
+                      ? "Similar products"
+                      : "Similar items")}
                 </h3>
 
                 {/* Outer scroll container */}
@@ -726,7 +799,8 @@ const messageShop = () => {
                     }}
                   >
                     {related.map((p) => {
-                      const img = p.photoUrl || `/api/products/${p.id}/image`;
+                      const img =
+                        p.photoUrl || `/api/products/${p.id}/image`;
 
                       return (
                         <div
@@ -737,13 +811,15 @@ const messageShop = () => {
                             if ((e as any).defaultPrevented) return;
                             e.preventDefault();
                             e.stopPropagation();
-                            if (mode === "buyer") nav(`/s/${slug}/p/${p.id}`);
+                            if (mode === "buyer")
+                              nav(`/s/${slug}/p/${p.id}`);
                             else nav(`/universal/p/${p.id}`);
                           }}
                           onKeyDown={(e) => {
                             if (e.key === "Enter" || e.key === " ") {
                               e.preventDefault();
-                              if (mode === "buyer") nav(`/s/${slug}/p/${p.id}`);
+                              if (mode === "buyer")
+                                nav(`/s/${slug}/p/${p.id}`);
                               else nav(`/universal/p/${p.id}`);
                             }
                           }}
@@ -759,7 +835,9 @@ const messageShop = () => {
                             mode={mode}
                             image={img}
                             shopName={shopName}
-                            shopPhone={mode === "buyer" ? shopPhone : undefined}
+                            shopPhone={
+                              mode === "buyer" ? shopPhone : undefined
+                            }
                             onAdd={
                               mode === "buyer"
                                 ? (handleRelatedAddToCart as any)
@@ -793,7 +871,8 @@ const messageShop = () => {
                   }}
                 >
                   {exploreMore.map((p) => {
-                    const img = p.photoUrl || `/api/products/${p.id}/image`;
+                    const img =
+                      p.photoUrl || `/api/products/${p.id}/image`;
 
                     return (
                       <div
@@ -803,86 +882,93 @@ const messageShop = () => {
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          if (mode === "buyer") nav(`/s/${slug}/p/${p.id}`);
+                          if (mode === "buyer")
+                            nav(`/s/${slug}/p/${p.id}`);
                           else nav(`/universal/p/${p.id}`);
                         }}
                         onKeyDown={(e) => {
                           if (e.key === "Enter" || e.key === " ") {
                             e.preventDefault();
-                            if (mode === "buyer") nav(`/s/${slug}/p/${p.id}`);
+                            if (mode === "buyer")
+                              nav(`/s/${slug}/p/${p.id}`);
                             else nav(`/universal/p/${p.id}`);
                           }
                         }}
                         style={{
                           display: "flex",
                           alignItems: "center",
-                          padding: "12px 0",                // was 8px → +50% height
+                          padding: "12px 0",
                           borderBottom: "1px solid #eee",
                           cursor: "pointer",
                         }}
+                      >
+                        {/* Thumbnail */}
+                        <div
+                          style={{
+                            width: 75,
+                            height: 75,
+                            borderRadius: 12,
+                            backgroundImage: `url(${img})`,
+                            backgroundSize: "cover",
+                            backgroundPosition: "center",
+                            backgroundColor: "#eee",
+                            flexShrink: 0,
+                          }}
+                        />
+
+                        {/* Text */}
+                        <div
+                          style={{
+                            flex: 1,
+                            marginLeft: 14,
+                            minWidth: 0,
+                          }}
                         >
-                          {/* Thumbnail */}
                           <div
                             style={{
-                              width: 75,                     // was 56 → +33%
-                              height: 75,                    // was 56 → +33%
-                              borderRadius: 12,              // was 10 → slightly larger look
-                              backgroundImage: `url(${img})`,
-                              backgroundSize: "cover",
-                              backgroundPosition: "center",
-                              backgroundColor: "#eee",
-                              flexShrink: 0,
+                              fontSize: 17,
+                              fontWeight: 600,
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              marginBottom: 4,
                             }}
-                          />
+                          >
+                            {p.title}
+                          </div>
 
-                          {/* Text */}
-                          <div style={{ flex: 1, marginLeft: 14, minWidth: 0 }}> {/* was 10 */}
+                          {p.description && (
                             <div
                               style={{
-                                fontSize: 17,                // was 14 → +21%
-                                fontWeight: 600,
+                                fontSize: 13,
+                                color: "#777",
                                 whiteSpace: "nowrap",
                                 overflow: "hidden",
                                 textOverflow: "ellipsis",
-                                marginBottom: 4,             // was 2
                               }}
                             >
-                              {p.title}
+                              {p.description}
                             </div>
+                          )}
+                        </div>
 
-                            {p.description && (
-                              <div
-                                style={{
-                                  fontSize: 13,               // was 11
-                                  color: "#777",
-                                  whiteSpace: "nowrap",
-                                  overflow: "hidden",
-                                  textOverflow: "ellipsis",
-                                }}
-                              >
-                                {p.description}
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Price */}
+                        {/* Price */}
+                        <div
+                          style={{
+                            marginLeft: 12,
+                            textAlign: "right",
+                            flexShrink: 0,
+                          }}
+                        >
                           <div
                             style={{
-                              marginLeft: 12,                 // was 8
-                              textAlign: "right",
-                              flexShrink: 0,
+                              fontSize: 17,
+                              fontWeight: 700,
                             }}
                           >
-                            <div
-                              style={{
-                                fontSize: 17,                 // was 14
-                                fontWeight: 700,
-                              }}
-                            >
-                              {p.price} {p.currency}
-                            </div>
+                            {p.price} {p.currency}
                           </div>
-
+                        </div>
                       </div>
                     );
                   })}
@@ -915,4 +1001,43 @@ const actionBtnBox: React.CSSProperties = {
   textAlign: "center",
   cursor: "pointer",
   boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+};
+
+// Same look & feel as OwnerProductDetail
+const galleryBtnLeft: React.CSSProperties = {
+  position: "absolute",
+  top: "50%",
+  left: 6,
+  transform: "translateY(-50%)",
+  border: "none",
+  background: "rgba(0,0,0,.5)",
+  color: "#fff",
+  width: 28,
+  height: 28,
+  borderRadius: 999,
+  cursor: "pointer",
+};
+
+const galleryBtnRight: React.CSSProperties = {
+  position: "absolute",
+  top: "50%",
+  right: 6,
+  transform: "translateY(-50%)",
+  border: "none",
+  background: "rgba(0,0,0,.5)",
+  color: "#fff",
+  width: 28,
+  height: 28,
+  borderRadius: 999,
+  cursor: "pointer",
+};
+
+const galleryThumb: React.CSSProperties = {
+  width: 36,
+  height: 36,
+  borderRadius: 8,
+  background: "#ddd",
+  backgroundSize: "cover",
+  backgroundPosition: "center",
+  cursor: "pointer",
 };

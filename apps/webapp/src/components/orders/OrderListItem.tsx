@@ -4,6 +4,7 @@ import { money, dateTime } from "../../lib/format";
 import { Badge } from "../common/Badge";
 
 export function OrderListItem({ order, onClick }: { order: Order; onClick: () => void }) {
+  // Keep this simple: one row per order, click to open details
   return (
     <div style={row} onClick={onClick}>
       <div>

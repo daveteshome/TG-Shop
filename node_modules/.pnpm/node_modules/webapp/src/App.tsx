@@ -6,7 +6,6 @@ import { api } from "./lib/api/index";
 import Home from "./routes/Home";
 import Cart from "./routes/Cart";
 import Profile from "./routes/Profile";
-import Orders from "./routes/Orders";
 import OrderDetail from "./routes/OrderDetail";
 import ProductDetail from "./routes/ProductDetail";
 import OwnerProductDetail from "./routes/OwnerProductDetail";
@@ -23,6 +22,10 @@ import ShopAnalytics from "./routes/ShopAnalytics";
 import ShopTopProducts from "./routes/ShopTopProducts";
 import JoinedShops from "./routes/JoinedShops";
 import ShopBuyer from "./routes/ShopBuyer";
+import BuyerOrders from "./routes/BuyerOrders";
+import BuyerOrderDetail from "./routes/BuyerOrderDetail";
+
+
 
 import ErrorBoundary from "./components/common/ErrorBoundary";
 import HeaderBar from "./components/layout/HeaderBar";
@@ -30,6 +33,8 @@ import DrawerMenu from "./components/DrawerMenu";
 import ShopProfileDrawer from "./components/shop/ShopProfileDrawer";
 import FooterNav from "./components/layout/FooterNav";
 import Favorites from "./routes/Favorites";
+
+import Checkout from "./routes/Checkout";
 
 import { ensureInitDataCached, ready } from "./lib/telegram";
 
@@ -578,6 +583,7 @@ export default function App() {
             <Route path="/shop/:slug/categories" element={<ShopCategories />} />
             <Route path="/shop/:slug/invitations" element={<ShopInvitations />} />
             <Route path="/shop/:slug/orders" element={<ShopOrders />} />
+            <Route path="/shop/:slug/orders/:orderId" element={<OrderDetail />} />
             <Route path="/shop/:slug/analytics" element={<ShopAnalytics />} />
             <Route path="/shop/:slug/analytics/top-products" element={<ShopTopProducts />} />
 
@@ -589,15 +595,18 @@ export default function App() {
 
             <Route path="/s/:slug" element={<ShopBuyer />} />
             <Route path="/s/:slug/p/:id" element={<ProductDetail />} />
-            <Route path="/s/:slug/orders" element={<ShopOrders />} />
+            <Route path="/s/:slug/orders" element={<BuyerOrders  />} />
+            <Route path="/s/:slug/orders/:orderId" element={<BuyerOrderDetail />} />
 
             <Route path="/favorites" element={<Favorites />} />
 
             {/* legacy/global */}
             <Route path="/s/:slug/cart" element={<Cart />} /> {/* buyer-scoped */}
-
+            <Route path="/s/:slug/checkout" element={<Checkout />} />
             {/* If you still use OrderDetail: */}
             {/* <Route path="/orders/:id" element={<OrderDetail />} /> */}
+
+            
           </Routes>
         </ErrorBoundary>
       </main>

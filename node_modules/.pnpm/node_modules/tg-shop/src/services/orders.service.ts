@@ -14,9 +14,10 @@ export const OrdersService = {
   async createSingleItemPending(
     tgId: string,
     product: { id: string; title: string; price: number | string | Prisma.Decimal; currency: string },
-    opts: { shippingAddress?: string | null; note?: string | null } = {}
+    opts: { shippingAddress?: string | null; note?: string | null } = {},
+    tenantIdOverride?: string,
   ) {
-    const tenantId = await getTenantId();
+    const tenantId = tenantIdOverride ?? (await getTenantId());
 
     // Load product to confirm it belongs to tenant and is active
     const p = await db.product.findFirst({ where: { id: product.id, tenantId, active: true } });
@@ -52,8 +53,8 @@ export const OrdersService = {
     });
   },
 
-  async listUserOrders(tgId: string, take = 5) {
-    const tenantId = await getTenantId();
+  async listUserOrders(tgId: string, take = 5, tenantIdOverride?: string) {
+    const tenantId = tenantIdOverride ?? (await getTenantId());
     return db.order.findMany({
       where: { tenantId, userId: tgId },
       include: { items: true },
@@ -62,8 +63,8 @@ export const OrdersService = {
     });
   },
 
-  async listByStatus(status: string | undefined, take = 10) {
-    const tenantId = await getTenantId();
+  async listByStatus(status: string | undefined, take = 10, tenantIdOverride?: string) {
+    const tenantId = tenantIdOverride ?? (await getTenantId());
     const where: any = { tenantId };
     if (status) where.status = status as OrderStatus;
     return db.order.findMany({
@@ -74,8 +75,8 @@ export const OrdersService = {
     });
   },
 
-  async setStatus(id: string, nextStatus: OrderStatus) {
-    const tenantId = await getTenantId();
+  async setStatus(id: string, nextStatus: OrderStatus, tenantIdOverride?: string) {
+    const tenantId = tenantIdOverride ?? (await getTenantId());
 
     const order = await db.order.findFirst({
       where: { id, tenantId },
@@ -93,8 +94,13 @@ export const OrdersService = {
     return db.order.update({ where: { id }, data: { status: nextStatus } });
   },
 
-  async checkoutFromCartWithDetails(userId: string, opts: { shippingAddress?: string | null; note?: string | null } = {}) {
-    const tenantId = await getTenantId();
+  async checkoutFromCartWithDetails(
+    userId: string,
+    opts: { shippingAddress?: string | null; note?: string | null } = {},
+    tenantIdOverride?: string,
+  ) {
+    const tenantId = tenantIdOverride ?? (await getTenantId());
+
     const cart = await db.cart.findUnique({
       where: { tenantId_userId: { tenantId, userId } },
       include: { items: { include: { product: true, variant: true } } },
@@ -110,7 +116,7 @@ export const OrdersService = {
     const currency = cart.items[0].product.currency;
     const total = cart.items.reduce(
       (s, it) => s.add((it.unitPrice as unknown as Prisma.Decimal).mul(it.quantity)),
-      new Prisma.Decimal(0)
+      new Prisma.Decimal(0),
     );
 
     const order = await db.order.create({

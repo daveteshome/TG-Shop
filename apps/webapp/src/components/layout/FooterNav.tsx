@@ -10,9 +10,15 @@ export default function FooterNav({ onOpenMenu }: Props) {
   const { pathname } = useLocation();
   const nav = useNavigate();
 
-  const inShop = pathname.startsWith("/shop/");
-  const slug = inShop ? pathname.split("/")[2] : null;
+  // 🔹 Distinguish owner-shop vs buyer-shop vs everything else
+  const inOwnerShop = pathname.startsWith("/shop/");
+  const inBuyerShop = pathname.startsWith("/s/");
+  const inShop = inOwnerShop || inBuyerShop;
 
+  const slug = inShop ? pathname.split("/")[2] : null;
+  const shopPrefix = inBuyerShop ? "/s" : "/shop";
+
+  // 🔹 Universal context = not in any shop (owner or buyer)
   const isUniversal =
     pathname === "/" ||
     pathname.startsWith("/universal") ||
@@ -28,7 +34,8 @@ export default function FooterNav({ onOpenMenu }: Props) {
 
   const handleHome = (e: React.MouseEvent) => {
     e.preventDefault();
-    const target = isUniversal ? "/" : (slug ? `/shop/${slug}` : "/");
+    const target = isUniversal ? "/" : slug ? `${shopPrefix}/${slug}` : "/";
+
     if (pathname !== target) {
       nav(target);
       // let the route change, then scroll
@@ -69,7 +76,7 @@ export default function FooterNav({ onOpenMenu }: Props) {
           <div style={navLabel}>{t("nav_menu", "Menu")}</div>
         </button>
 
-        {/* 2) My Shop (universal) or Universal (in shop) */}
+        {/* 2) My Shop (when universal) or Universal (when inside any shop) */}
         {isUniversal ? (
           <Link to="/shops?mine=1" style={navBtn}>
             <div style={navIcon}>🏪</div>
@@ -82,14 +89,25 @@ export default function FooterNav({ onOpenMenu }: Props) {
           </Link>
         )}
 
-        {/* 3) Joined (universal) or Orders (in shop) */}
+        {/* 3) Joined (when universal) or Orders (when inside a shop) */}
         {isUniversal ? (
           <Link to="/joined" style={navBtn}>
             <div style={navIcon}>🛍️</div>
             <div style={navLabel}>{t("nav_joined", "Joined Shops")}</div>
           </Link>
         ) : (
-          <Link to={slug ? `/shop/${slug}/orders` : "/orders"} style={navBtn}>
+          <Link
+            // 🔹 Owner: /shop/:slug/orders
+            // 🔹 Buyer: /s/:slug/orders
+            to={
+              slug
+                ? inBuyerShop
+                  ? `/s/${slug}/orders`
+                  : `/shop/${slug}/orders`
+                : "/orders"
+            }
+            style={navBtn}
+          >
             <div style={navIcon}>📦</div>
             <div style={navLabel}>{t("nav_orders", "Orders")}</div>
           </Link>
@@ -97,7 +115,7 @@ export default function FooterNav({ onOpenMenu }: Props) {
 
         {/* 4) Home (context-aware + scroll-to-top) */}
         <a
-          href={isUniversal ? "/" : (slug ? `/shop/${slug}` : "/")}
+          href={isUniversal ? "/" : slug ? `${shopPrefix}/${slug}` : "/"}
           onClick={handleHome}
           style={navBtn}
         >

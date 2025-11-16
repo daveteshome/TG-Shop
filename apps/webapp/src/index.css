@@ -30,3 +30,10 @@ button:disabled {
   opacity: .6;
   cursor: not-allowed;
 }
+
+/* Make the text cursor (caret) visible everywhere */
+input,
+textarea,
+[contenteditable="true"] {
+  caret-color: var(--tg-theme-text-color, #111);
+}

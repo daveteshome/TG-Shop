@@ -141,62 +141,109 @@ export default function HeaderBar({
   const showBack = !isRootLike;
 
   // Smart back: prefer real history; otherwise compute fallback per route
-    function smartBack() {
-    if (window.history.length > 1) {
-      nav(-1);
-      return;
-    }
-
-    // /universal/p/:id → last universal (or /universal)
-    if (/^\/universal\/p\/[^/]+/.test(path)) {
-      const lastUniversal = localStorage.getItem("tgshop:lastUniversalPage") || "/universal";
-      nav(lastUniversal, { replace: true });
-      return;
-    }
-
-    // /s/:slug/p/:id → last shop (or /s/:slug)
-    {
-      const m = path.match(/^\/s\/([^/]+)\/p\/[^/]+/);
-      if (m) {
-        const s = m[1];
-        const lastShop = localStorage.getItem("tgshop:lastShopPage");
-        nav(lastShop || `/s/${s}`, { replace: true });
-        return;
-      }
-    }
-
-    // /shop/:slug/p/:id → last owner shop (or /shop/:slug)
-    {
-      const m = path.match(/^\/shop\/([^/]+)\/p\/[^/]+/);
-      if (m) {
-        const s = m[1];
-        const lastOwner = localStorage.getItem("tgshop:lastOwnerShopPage");
-        nav(lastOwner || `/shop/${s}`, { replace: true });
-        return;
-      }
-    }
-
-    // ⭐ NEW: buyer cart /s/:slug/cart → back to that shop (or its last list page)
-    {
-      const m = path.match(/^\/s\/([^/]+)\/cart$/);
-      if (m) {
-        const s = m[1];
-        const lastShop = localStorage.getItem("tgshop:lastShopPage");
-        nav(lastShop || `/s/${s}`, { replace: true });
-        return;
-      }
-    }
-
-    // ⭐ NEW: global /cart → back to universal list
-    if (path === "/cart") {
-      const lastUniversal = localStorage.getItem("tgshop:lastUniversalPage") || "/universal";
-      nav(lastUniversal, { replace: true });
-      return;
-    }
-
-    // Generic fallback
-    nav("/universal", { replace: true });
+  // Smart back: prefer real history; otherwise compute fallback per route
+  function smartBack() {
+  if (window.history.length > 1) {
+    nav(-1);
+    return;
   }
+
+  // /universal/p/:id → last universal (or /universal)
+  if (/^\/universal\/p\/[^/]+/.test(path)) {
+    const lastUniversal =
+      localStorage.getItem("tgshop:lastUniversalPage") || "/universal";
+    nav(lastUniversal, { replace: true });
+    return;
+  }
+
+  // /s/:slug/p/:id → last shop page (or /s/:slug)
+  {
+    const m = path.match(/^\/s\/([^/]+)\/p\/[^/]+/);
+    if (m) {
+      const s = m[1];
+      const lastShop =
+        localStorage.getItem("tgshop:lastShopPage") || `/s/${s}`;
+      nav(lastShop, { replace: true });
+      return;
+    }
+  }
+
+  // /shop/:slug/p/:id → last owner shop page (or /shop/:slug)
+  {
+    const m = path.match(/^\/shop\/([^/]+)\/p\/[^/]+/);
+    if (m) {
+      const s = m[1];
+      const lastOwner =
+        localStorage.getItem("tgshop:lastOwnerShopPage") || `/shop/${s}`;
+      nav(lastOwner, { replace: true });
+      return;
+    }
+  }
+
+  // Buyer child pages (cart, checkout, orders list)
+  {
+    const m = path.match(/^\/s\/([^/]+)\/(cart|checkout|orders)(?:\/?$)/);
+    if (m) {
+      const slug = m[1];
+      const section = m[2];
+
+      if (section === "checkout") {
+        nav(`/s/${slug}/cart`, { replace: true });
+      } else if (section === "orders") {
+        nav(`/s/${slug}`, { replace: true });
+      } else {
+        // cart
+        nav(`/s/${slug}`, { replace: true });
+      }
+      return;
+    }
+  }
+
+  // Buyer order detail: /s/:slug/orders/:orderId → back to orders list
+  {
+    const m = path.match(/^\/s\/([^/]+)\/orders\/[^/]+/);
+    if (m) {
+      const slug = m[1];
+      nav(`/s/${slug}/orders`, { replace: true });
+      return;
+    }
+  }
+
+  // OWNER orders list: /shop/:slug/orders → back to shop root
+  {
+    const m = path.match(/^\/shop\/([^/]+)\/orders\/?$/);
+    if (m) {
+      const slug = m[1];
+      nav(`/shop/${slug}`, { replace: true });
+      return;
+    }
+  }
+
+
+  // OWNER orders list: /shop/:slug/orders → back to shop root
+  {
+    const m = path.match(/^\/shop\/([^/]+)\/orders\/?$/);
+    if (m) {
+      const slug = m[1];
+      nav(`/shop/${slug}`, { replace: true });
+      return;
+    }
+  }
+
+  // OWNER order detail: /shop/:slug/orders/:orderId → back to orders list
+  {
+    const m = path.match(/^\/shop\/([^/]+)\/orders\/[^/]+/);
+    if (m) {
+      const slug = m[1];
+      nav(`/shop/${slug}/orders`, { replace: true });
+      return;
+    }
+  }
+
+
+  // Generic fallback
+  nav("/universal", { replace: true });
+}
 
 
   return (

@@ -1,6 +1,6 @@
 // apps/webapp/src/routes/Cart.tsx
 import React, { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { Loader } from "../components/common/Loader";
 import { ErrorView } from "../components/common/ErrorView";
 import { money } from "../lib/format";
@@ -25,14 +25,19 @@ function mapApiItem(i: any): CartLine {
   const currency = String(i.currency ?? i.product?.currency ?? "ETB");
   const qty = Number(i.qty ?? i.quantity ?? 1);
 
-  // 👇 Comes from CartService.list (imageUrl)
-  const imageUrl = i.imageUrl ?? i.thumbUrl ?? null;
+  const imageUrl =
+    i.imageUrl ??
+    i.thumbUrl ??
+    i.product?.images?.[0]?.webUrl ??
+    i.product?.images?.[0]?.url ??
+    null;
 
   return { itemId, productId, title, unitPrice, currency, qty, imageUrl };
 }
 
 export default function Cart() {
   const { slug } = useParams<{ slug?: string }>();
+  const nav = useNavigate();
 
   const [items, setItems] = useState<CartLine[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -166,7 +171,7 @@ export default function Cart() {
   const currency = items[0]?.currency || "ETB";
 
   if (initialLoading) return <Loader />;
-  if (err) return <ErrorView error={err} />;
+  if (err && !items.length) return <ErrorView error={err} />;
 
   return (
     <div style={{ padding: 10, paddingBottom: 90 }}>
@@ -180,6 +185,19 @@ export default function Cart() {
             {items.map((it) => {
               const src = it.imageUrl || undefined;
 
+              const handleOpen =
+                it.productId && it.productId.length > 0
+                  ? () => {
+                      if (slug) {
+                        // Buyer shop cart → buyer product detail
+                        nav(`/s/${slug}/p/${it.productId}`);
+                      } else {
+                        // Global cart (if used) → universal product detail
+                        nav(`/universal/p/${it.productId}`);
+                      }
+                    }
+                  : undefined;
+
               return (
                 <CartRow
                   key={it.itemId}
@@ -192,6 +210,7 @@ export default function Cart() {
                   onInc={() => onInc(it)}
                   onDec={() => onDec(it)}
                   onRemove={() => onRemove(it)}
+                  onOpen={handleOpen}
                 />
               );
             })}
@@ -201,6 +220,17 @@ export default function Cart() {
             <div style={{ fontWeight: 700 }}>Total</div>
             <div style={{ fontWeight: 800 }}>{money(total, currency)}</div>
           </div>
+
+          {/* Only for buyer-scoped cart (/s/:slug/cart) */}
+          {slug && items.length > 0 && (
+            <button
+              type="button"
+              onClick={() => nav(`/s/${slug}/checkout`)}
+              style={checkoutBtn}
+            >
+              Proceed to checkout
+            </button>
+          )}
         </>
       )}
     </div>
@@ -293,7 +323,6 @@ function CartRow({
   );
 }
 
-
 /* ---------- Styles ---------- */
 
 const row: React.CSSProperties = {
@@ -366,4 +395,17 @@ const summary: React.CSSProperties = {
   padding: 12,
   borderRadius: 12,
   background: "rgba(0,0,0,.04)",
+};
+
+const checkoutBtn: React.CSSProperties = {
+  width: "100%",
+  marginTop: 12,
+  padding: "10px 14px",
+  borderRadius: 12,
+  border: "none",
+  background: "#111",
+  color: "#fff",
+  fontWeight: 700,
+  fontSize: 15,
+  cursor: "pointer",
 };
