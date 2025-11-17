@@ -6,7 +6,7 @@ import { api } from "./lib/api/index";
 import Home from "./routes/Home";
 import Cart from "./routes/Cart";
 import Profile from "./routes/Profile";
-import OrderDetail from "./routes/OrderDetail";
+import ShopOrderDetail from "./routes/ShopOrderDetail";
 import ProductDetail from "./routes/ProductDetail";
 import OwnerProductDetail from "./routes/OwnerProductDetail";
 import Categories from "./routes/Categories";
@@ -24,8 +24,7 @@ import JoinedShops from "./routes/JoinedShops";
 import ShopBuyer from "./routes/ShopBuyer";
 import BuyerOrders from "./routes/BuyerOrders";
 import BuyerOrderDetail from "./routes/BuyerOrderDetail";
-
-
+import Orders from "./routes/Orders";
 
 import ErrorBoundary from "./components/common/ErrorBoundary";
 import HeaderBar from "./components/layout/HeaderBar";
@@ -53,6 +52,42 @@ const appStyle: React.CSSProperties = {
 };
 
 /* ====================== Helpers ====================== */
+function OrdersRouter() {
+  const nav = useNavigate();
+
+  React.useEffect(() => {
+    let slug: string | null = null;
+
+    try {
+      // Prefer last OWNER shop page
+      const lastOwner = localStorage.getItem("tgshop:lastOwnerShopPage") || "";
+      const ownerMatch = lastOwner.match(/^\/shop\/([^/]+)/);
+      if (ownerMatch) {
+        slug = ownerMatch[1];
+      } else {
+        // Fallback to last buyer shop page
+        const lastShop = localStorage.getItem("tgshop:lastShopPage") || "";
+        const buyerMatch = lastShop.match(/^\/s\/([^/]+)/);
+        if (buyerMatch) {
+          slug = buyerMatch[1];
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    if (slug) {
+      // Go to combined Orders page for that shop
+      nav(`/shop/${slug}/orders`, { replace: true });
+    } else {
+      // If we really have no context, show joined shops instead of white screen
+      nav("/joined", { replace: true });
+    }
+  }, [nav]);
+
+  // Nothing to render; we just redirect
+  return null;
+}
 
 /** Normalize a react-router location for both BrowserRouter / HashRouter and /tma prefix */
 function routedPath(loc: ReturnType<typeof useLocation>): string {
@@ -583,7 +618,7 @@ export default function App() {
             <Route path="/shop/:slug/categories" element={<ShopCategories />} />
             <Route path="/shop/:slug/invitations" element={<ShopInvitations />} />
             <Route path="/shop/:slug/orders" element={<ShopOrders />} />
-            <Route path="/shop/:slug/orders/:orderId" element={<OrderDetail />} />
+            <Route path="/shop/:slug/orders/:orderId" element={<ShopOrderDetail />} />
             <Route path="/shop/:slug/analytics" element={<ShopAnalytics />} />
             <Route path="/shop/:slug/analytics/top-products" element={<ShopTopProducts />} />
 
@@ -592,6 +627,7 @@ export default function App() {
             <Route path="/products" element={<Products />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/joined" element={<JoinedShops />} />
+            <Route path="/orders" element={<Orders />} /> 
 
             <Route path="/s/:slug" element={<ShopBuyer />} />
             <Route path="/s/:slug/p/:id" element={<ProductDetail />} />

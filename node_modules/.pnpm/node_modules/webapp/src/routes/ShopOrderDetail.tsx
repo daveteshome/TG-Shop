@@ -29,13 +29,15 @@ type OrderDetail = {
 };
 
 type ProductBrief = {
-  thumbUrl: string | null;   // cover image (first)
-  imageUrls: string[];       // all images for slider
+  thumbUrl: string | null; // cover image (first)
+  imageUrls: string[]; // all images for slider
   title: string;
   description: string | null;
   price: string | null;
   currency: string | null;
 };
+
+const ORDER_STATUSES = ["pending", "paid", "shipped", "completed", "cancelled"] as const;
 
 export default function OrderDetail() {
   // Owner route: /shop/:slug/orders/:orderId
@@ -45,10 +47,12 @@ export default function OrderDetail() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
+  // status update
+  const [statusSaving, setStatusSaving] = useState(false);
+  const [statusErr, setStatusErr] = useState<string | null>(null);
+
   // productId -> product brief (images + basic info)
-  const [productInfo, setProductInfo] = useState<
-    Record<string, ProductBrief | null>
-  >({});
+  const [productInfo, setProductInfo] = useState<Record<string, ProductBrief | null>>({});
 
   // which line is expanded (productId + variantId)
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
@@ -81,8 +85,7 @@ export default function OrderDetail() {
           variant: it.variant ?? it.variantSnapshot ?? null,
           quantity: Number(it.quantity ?? 1),
           unitPrice:
-            it.unitPrice &&
-            typeof (it.unitPrice as any).toString === "function"
+            it.unitPrice && typeof (it.unitPrice as any).toString === "function"
               ? (it.unitPrice as any).toString()
               : String(it.unitPrice ?? "0"),
           currency: String(it.currency ?? res.currency ?? "ETB"),
@@ -95,9 +98,7 @@ export default function OrderDetail() {
           total,
           currency: String(res.currency ?? "ETB"),
           note: res.note ?? null,
-          createdAt: res.createdAt
-            ? String(res.createdAt)
-            : new Date().toISOString(),
+          createdAt: res.createdAt ? String(res.createdAt) : new Date().toISOString(),
           items,
         };
 
@@ -112,6 +113,40 @@ export default function OrderDetail() {
     void load();
   }, [orderId, slug]);
 
+  /* ---------------- Status change handler ---------------- */
+
+  async function handleStatusChange(nextStatus: string) {
+    if (!order || !slug || !orderId) return;
+    if (nextStatus === order.status) return;
+
+    setStatusSaving(true);
+    setStatusErr(null);
+
+    const prevStatus = order.status;
+
+    // Optimistic update
+    setOrder((prev) => (prev ? { ...prev, status: nextStatus } : prev));
+
+    try {
+      // 🔧 Adjust this if your api helper uses a different signature
+      await api<any>(`/shop/${slug}/orders/${orderId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({ status: nextStatus }),
+    });
+
+
+    } catch (e: any) {
+      // revert on failure
+      setOrder((prev) => (prev ? { ...prev, status: prevStatus } : prev));
+      setStatusErr(e?.message || "Failed to update status");
+    } finally {
+      setStatusSaving(false);
+    }
+  }
+
   /* ---------------- Load product info (images + details) ---------------- */
 
   async function loadProductInfo(productId: string, currentSlug: string) {
@@ -119,9 +154,7 @@ export default function OrderDetail() {
     if (productInfo[productId] !== undefined) return;
 
     try {
-      const res: any = await api<any>(
-        `/shop/${currentSlug}/products/${productId}`
-      );
+      const res: any = await api<any>(`/shop/${currentSlug}/products/${productId}`);
 
       const rawProduct = res?.product ?? res;
 
@@ -154,9 +187,7 @@ export default function OrderDetail() {
         imageUrls,
         title: String(rawProduct?.title ?? ""),
         description:
-          typeof rawProduct?.description === "string"
-            ? rawProduct.description
-            : null,
+          typeof rawProduct?.description === "string" ? rawProduct.description : null,
         price:
           rawProduct?.price != null
             ? String(
@@ -165,8 +196,7 @@ export default function OrderDetail() {
                   : rawProduct.price
               )
             : null,
-        currency:
-          (rawProduct?.currency && String(rawProduct.currency)) || null,
+        currency: (rawProduct?.currency && String(rawProduct.currency)) || null,
       };
 
       setProductInfo((prev) => ({ ...prev, [productId]: brief }));
@@ -224,6 +254,13 @@ export default function OrderDetail() {
   const created = new Date(order.createdAt);
   const dateStr = created.toLocaleString();
 
+  const options = ORDER_STATUSES.filter((s) => {
+    // allow "pending" only if current status is still pending
+    if (s === "pending" && order.status !== "pending") return false;
+    return true;
+  });
+
+
   return (
     <div>
       <TopBar title={`Order #${short}`} />
@@ -232,12 +269,41 @@ export default function OrderDetail() {
         <div style={{ marginBottom: 10 }}>
           <div style={{ fontSize: 14, opacity: 0.7 }}>Order</div>
           <div style={{ fontSize: 18, fontWeight: 700 }}>#{short}</div>
-          <div style={{ marginTop: 4, fontSize: 12, opacity: 0.7 }}>
-            {dateStr}
+          <div style={{ marginTop: 4, fontSize: 12, opacity: 0.7 }}>{dateStr}</div>
+
+          {/* Status selector */}
+          <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 12, opacity: 0.8 }}>Status:</span>
+            <select
+              value={order.status}
+              onChange={(e) => handleStatusChange(e.target.value)}
+              disabled={statusSaving}
+              style={{
+                flexShrink: 0,
+                borderRadius: 999,
+                padding: "4px 10px",
+                fontSize: 12,
+                border: "1px solid rgba(0,0,0,.15)",
+                background: "#fff",
+              }}
+            >
+              {options.map((s) => (
+                <option key={s} value={s}>
+                  {s.charAt(0).toUpperCase() + s.slice(1)}
+                </option>
+              ))}
+            </select>
+
+
+            {statusSaving && (
+              <span style={{ fontSize: 11, opacity: 0.7 }}>Saving...</span>
+            )}
           </div>
-          <div style={{ marginTop: 6 }}>
-            <span style={statusBadge(order.status)}>{order.status}</span>
-          </div>
+          {statusErr && (
+            <div style={{ fontSize: 11, color: "#cf1322", marginTop: 2 }}>
+              {statusErr}
+            </div>
+          )}
         </div>
 
         {/* Total & note */}
@@ -294,8 +360,7 @@ export default function OrderDetail() {
             const currentIndex = imageIndex[it.productId] ?? 0;
             const safeIndex =
               images.length > 0
-                ? ((currentIndex % images.length) + images.length) %
-                  images.length
+                ? ((currentIndex % images.length) + images.length) % images.length
                 : 0;
             const currentImage =
               images.length > 0 ? images[safeIndex] : info?.thumbUrl ?? null;
@@ -311,8 +376,7 @@ export default function OrderDetail() {
               if (!images.length) return;
               setImageIndex((prev) => ({
                 ...prev,
-                [it.productId]:
-                  (safeIndex - 1 + images.length) % images.length,
+                [it.productId]: (safeIndex - 1 + images.length) % images.length,
               }));
             };
 
@@ -388,7 +452,7 @@ export default function OrderDetail() {
                   </div>
                 </div>
 
-                {/* Expanded content: ONE image + arrows + thumbnails + name + price + description */}
+                {/* Expanded content: image + arrows + thumbnails + name + price + description */}
                 {isExpanded && (
                   <div
                     style={{
@@ -572,33 +636,3 @@ const thumbImg: React.CSSProperties = {
   backgroundColor: "#ddd",
   cursor: "pointer",
 };
-
-function statusBadge(status: string): React.CSSProperties {
-  let bg = "rgba(0,0,0,.06)";
-  let color = "#333";
-  if (status === "pending") {
-    bg = "rgba(255, 193, 7, 0.15)";
-    color = "#8a6d00";
-  } else if (status === "paid") {
-    bg = "rgba(25, 135, 84, 0.15)";
-    color = "#155724";
-  } else if (status === "shipped") {
-    bg = "rgba(13, 110, 253, 0.15)";
-    color = "#0b5ed7";
-  } else if (status === "completed") {
-    bg = "rgba(25, 135, 84, 0.15)";
-    color = "#155724";
-  } else if (status === "cancelled") {
-    bg = "rgba(220, 53, 69, 0.15)";
-    color = "#842029";
-  }
-
-  return {
-    fontSize: 11,
-    padding: "2px 8px",
-    borderRadius: 999,
-    background: bg,
-    color,
-    textTransform: "capitalize",
-  };
-}

@@ -1,4 +1,3 @@
-// src/components/shop/ShopBottomBar.tsx
 import React from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 
@@ -53,8 +52,20 @@ export default function ShopBottomBar() {
         🏠
         <span style={{ fontSize: 11 }}>Shop</span>
       </button>
+
       <button
-        onClick={() => nav("/orders")}
+        onClick={() => {
+          if (!slug) return;
+          // Make sure owner context is remembered, then open combined Orders page
+          try {
+            localStorage.setItem("tgshop:lastOwnerShopPage", `/shop/${slug}`);
+            localStorage.setItem(
+              "tgshop:lastOwnerShopPageAt",
+              String(Date.now())
+            );
+          } catch {}
+          nav("/orders");
+        }}
         style={{
           border: "none",
           background: "transparent",
@@ -67,7 +78,6 @@ export default function ShopBottomBar() {
         📦
         <span style={{ fontSize: 11 }}>Orders</span>
       </button>
-      {/* reserved for future per-shop cart */}
     </nav>
   );
 }
