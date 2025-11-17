@@ -62,13 +62,17 @@ export interface Order {
   items: OrderItem[];
 }
 
-export interface Profile {
+export type Profile = {
   tgId: string;
-  username: string | null;
-  name: string | null;
   phone: string | null;
+  name: string | null;
+  username: string | null;
 
+  country: string | null;
   city: string | null;
   place: string | null;
   specialReference: string | null;
-}
+
+  avatarUrl: string | null;
+};
+

@@ -1567,25 +1567,80 @@ api.get("/orders/:id", async (req: any, res) => {
   }
 });
 // ---------- Profile ----------
-api.get('/profile', async (req: any, res) => {
+
+// top of file
+const DEFAULT_AVATARS = Array.from({ length: 20 }).map((_, i) => {
+  const n = String(i + 1).padStart(2, "0");
+  return `/avatars/avatar-${n}.png`;
+});
+
+function pickDefaultAvatar(tgId: string): string {
+  // deterministic: hash tgId to pick same avatar each time OR random
+  let hash = 0;
+  for (let i = 0; i < tgId.length; i++) {
+    hash = (hash * 31 + tgId.charCodeAt(i)) | 0;
+  }
+  const idx = Math.abs(hash) % DEFAULT_AVATARS.length;
+  return DEFAULT_AVATARS[idx];
+}
+
+// ---------- Profile ----------
+// GET /profile
+api.get("/profile", async (req: any, res) => {
   const userId = req.userId!;
   const u = await db.user.findUnique({ where: { tgId: userId } });
+
   res.json({
     tgId: userId,
     username: u?.username ?? null,
     name: u?.name ?? null,
-    phone: u?.phone ?? null
+    phone: u?.phone ?? null,
+    country: u?.country ?? null,
+    city: u?.city ?? null,
+    place: u?.place ?? null,
+    specialReference: u?.specialReference ?? null,
+    avatarUrl: u?.avatarUrl ?? null,
   });
 });
 
-api.put('/profile', async (req: any, res) => {
+// PUT /profile
+api.put("/profile", async (req: any, res) => {
   const userId = req.userId!;
-  const { phone, name, username } = req.body || {};
+  const {
+    phone,
+    name,
+    username,
+    country,
+    city,
+    place,
+    specialReference,
+    avatarUrl,
+  } = req.body || {};
+
   const u = await db.user.upsert({
     where: { tgId: userId },
-    update: { phone, name, username },
-    create: { tgId: userId, phone, name, username },
+    update: {
+      phone,
+      name,
+      username,
+      country,
+      city,
+      place,
+      specialReference,
+      avatarUrl,
+    },
+    create: {
+      tgId: userId,
+      phone,
+      name,
+      username,
+      country,
+      city,
+      place,
+      specialReference,
+      avatarUrl,
+    },
   });
+
   res.json(u);
 });
-
