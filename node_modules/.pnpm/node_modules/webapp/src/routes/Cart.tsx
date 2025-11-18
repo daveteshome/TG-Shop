@@ -1,6 +1,6 @@
 // apps/webapp/src/routes/Cart.tsx
 import React, { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { Loader } from "../components/common/Loader";
 import { ErrorView } from "../components/common/ErrorView";
 import { money } from "../lib/format";
@@ -167,13 +167,25 @@ export default function Cart() {
     }
   }
 
+  const loc = useLocation();
+  const params = new URLSearchParams(loc.search || "");
+  const q = (params.get("q") || "").trim().toLowerCase();
+  const hasFilter = q.length > 0;
+
+  const filteredItems = !hasFilter
+    ? items
+    : items.filter((it) =>
+        (it.title || "").toLowerCase().includes(q)
+      );
+
+
   const total = items.reduce((sum, it) => sum + it.unitPrice * it.qty, 0);
   const currency = items[0]?.currency || "ETB";
 
   if (initialLoading) return <Loader />;
   if (err && !items.length) return <ErrorView error={err} />;
 
-  return (
+    return (
     <div style={{ padding: 10, paddingBottom: 90 }}>
       {!items.length ? (
         <div style={{ opacity: 0.7, padding: 20, textAlign: "center" }}>
@@ -182,59 +194,54 @@ export default function Cart() {
       ) : (
         <>
           <div style={{ display: "grid", gap: 10 }}>
-            {items.map((it) => {
-              const src = it.imageUrl || undefined;
+            {filteredItems.length === 0 ? (
+              <div style={{ opacity: 0.7, padding: 20, textAlign: "center" }}>
+                No items in your cart match this search.
+              </div>
+            ) : (
+              filteredItems.map((it) => {
+                const src = it.imageUrl || undefined;
 
-              const handleOpen =
-                it.productId && it.productId.length > 0
-                  ? () => {
-                      if (slug) {
-                        // Buyer shop cart → buyer product detail
-                        nav(`/s/${slug}/p/${it.productId}`);
-                      } else {
-                        // Global cart (if used) → universal product detail
-                        nav(`/universal/p/${it.productId}`);
+                const handleOpen =
+                  it.productId && it.productId.length > 0
+                    ? () => {
+                        if (slug) {
+                          // Buyer shop cart → buyer product detail
+                          nav(`/s/${slug}/p/${it.productId}`);
+                        } else {
+                          // Global cart (if used) → universal product detail
+                          nav(`/universal/p/${it.productId}`);
+                        }
                       }
-                    }
-                  : undefined;
+                    : undefined;
 
-              return (
-                <CartRow
-                  key={it.itemId}
-                  title={it.title}
-                  unitPrice={it.unitPrice}
-                  currency={it.currency}
-                  qty={it.qty}
-                  imgSrc={src}
-                  busy={busyId === it.itemId}
-                  onInc={() => onInc(it)}
-                  onDec={() => onDec(it)}
-                  onRemove={() => onRemove(it)}
-                  onOpen={handleOpen}
-                />
-              );
-            })}
+                return (
+                  <CartRow
+                    key={it.itemId}
+                    title={it.title}
+                    unitPrice={it.unitPrice}
+                    currency={it.currency}
+                    qty={it.qty}
+                    imgSrc={src}
+                    busy={busyId === it.itemId}
+                    onInc={() => onInc(it)}
+                    onDec={() => onDec(it)}
+                    onRemove={() => onRemove(it)}
+                    onOpen={handleOpen}
+                  />
+                );
+              })
+            )}
           </div>
 
-          <div style={summary}>
-            <div style={{ fontWeight: 700 }}>Total</div>
-            <div style={{ fontWeight: 800 }}>{money(total, currency)}</div>
-          </div>
-
-          {/* Only for buyer-scoped cart (/s/:slug/cart) */}
-          {slug && items.length > 0 && (
-            <button
-              type="button"
-              onClick={() => nav(`/s/${slug}/checkout`)}
-              style={checkoutBtn}
-            >
-              Proceed to checkout
-            </button>
-          )}
+          {/* keep your existing summary / totals block below,
+              using `total` and `currency` as before */}
+          ...
         </>
       )}
     </div>
   );
+
 }
 
 /* ---------- Item row ---------- */

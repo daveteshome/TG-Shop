@@ -1,6 +1,6 @@
 // apps/webapp/src/routes/ShopCategories.tsx
 import React from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useLocation } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { TopBar } from "../components/layout/TopBar";
 import { CategoryGrid } from "../components/categories/CategoryGrid";
@@ -58,6 +58,7 @@ function normSlug(s?: string | null): string {
 export default function ShopCategories() {
   const { slug } = useParams<{ slug: string }>();
   const { t } = useTranslation();
+  const loc = useLocation();
 
   const [tree, setTree] = React.useState<Tree | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
@@ -216,6 +217,15 @@ export default function ShopCategories() {
       return aPos - bPos;
     });
   }
+
+      // Filter parents by search query (?q=...)
+    const params = new URLSearchParams(loc.search || "");
+    const q = (params.get("q") || "").trim().toLowerCase();
+    if (q) {
+      parents = parents.filter((p) =>
+        p.title.toLowerCase().includes(q)
+      );
+    }
 
   const activeChildren = activeId ? tree.childrenByParent[activeId] || [] : [];
 

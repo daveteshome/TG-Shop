@@ -140,6 +140,51 @@ export default function HeaderBar({
   const slug = inShop ? path.split("/")[2] : null;
   const showBack = !isRootLike;
 
+  // Page-type flags for context-aware search
+  const isShopsList = path === "/shops";
+  const isJoinedShopsList = path === "/joined";
+
+  const isBuyerOrdersList = /^\/s\/[^/]+\/orders\/?$/.test(path);
+  const isBuyerCart = /^\/s\/[^/]+\/cart\/?$/.test(path);
+
+  const isOwnerOrdersList = /^\/shop\/[^/]+\/orders\/?$/.test(path);
+  const isOwnerCategories = /^\/shop\/[^/]+\/categories\/?$/.test(path);
+  const isOwnerInvitations = /^\/shop\/[^/]+\/invitations\/?$/.test(path);
+
+  const isFavorites = path === "/favorites";
+  // Shared query in URL (?q=...)
+  const params = new URLSearchParams(loc.search || "");
+  const searchQ = params.get("q") || "";
+
+  function updateSearchQuery(next: string) {
+    const p = new URLSearchParams(loc.search || "");
+    if (next) p.set("q", next);
+    else p.delete("q");
+    const qs = p.toString();
+    const target = qs ? `${path}?${qs}` : path;
+    // replace so we don't spam history on every keystroke
+    nav(target, { replace: true });
+  }
+
+  // Product search config (default: product SearchBox)
+  let productScope: "universal" | "owner" | "buyer" = "universal";
+  let productTenantSlug: string | undefined;
+  let productBasePath = "/universal/search";
+
+  if (isUniversalSection) {
+    productScope = "universal";
+    productBasePath = "/universal/search";
+  } else if (inOwnerShop && slug) {
+    productScope = "owner";
+    productTenantSlug = slug;
+    productBasePath = `/shop/${slug}/search`;
+  } else if (inBuyerShop && slug) {
+    productScope = "buyer";
+    productTenantSlug = slug;
+    productBasePath = `/s/${slug}/search`;
+  }
+
+
   // Smart back: prefer real history; otherwise compute fallback per route
   // Smart back: prefer real history; otherwise compute fallback per route
   function smartBack() {
@@ -280,33 +325,178 @@ export default function HeaderBar({
         )}
 
         {/* Scoped Search */}
+                {/* Scoped Search */}
+                {/* Scoped Search */}
         <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ flex: 1, display: "flex", alignItems: "center", gap: 8, padding: "10px 12px" }}>
+          <div
+            style={{
+              flex: 1,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "10px 12px",
+            }}
+          >
             <span style={{ opacity: 0.6 }}>🔎</span>
             <div style={{ flex: 1 }}>
-              <SearchBox
-                scope={(window as any).__tgshopSearchScope || "universal"}
-                tenantSlug={(window as any).__tgshopSearchTenantSlug || undefined}
-                placeholder={(window as any).__tgshopSearchPlaceholder || "Search…"}
-                onSubmit={(q) => {
-                  const base = (window as any).__tgshopSearchBasePath || "/universal/search";
-                  nav(`${base}?q=${encodeURIComponent(q)}`);
-                }}
-                onSelectItem={(it) => {
-                  const scope = (window as any).__tgshopSearchScope || "universal";
-                  const tslug = (window as any).__tgshopSearchTenantSlug;
-                  if (scope === "universal") nav(`/universal/p/${it.id}`);
-                  else if (scope === "buyer" && tslug) nav(`/s/${tslug}/p/${it.id}`);
-                  else if (scope === "owner" && tslug) nav(`/shop/${tslug}/p/${it.id}`);
-                  else {
-                    const base = (window as any).__tgshopSearchBasePath || "/universal/search";
-                    nav(`${base}?q=${encodeURIComponent(it.title || "")}`);
+              {isShopsList ? (
+                // /shops -> filter my owned shops
+                <input
+                  type="search"
+                  value={searchQ}
+                  onChange={(e) => updateSearchQuery(e.target.value)}
+                  placeholder="Search your shops…"
+                  style={{
+                    width: "100%",
+                    border: "none",
+                    outline: "none",
+                    background: "transparent",
+                    fontSize: 14,
+                  }}
+                />
+              ) : isJoinedShopsList ? (
+                // /joined -> filter shops I joined
+                <input
+                  type="search"
+                  value={searchQ}
+                  onChange={(e) => updateSearchQuery(e.target.value)}
+                  placeholder="Search joined shops…"
+                  style={{
+                    width: "100%",
+                    border: "none",
+                    outline: "none",
+                    background: "transparent",
+                    fontSize: 14,
+                  }}
+                />
+              ) : isOwnerOrdersList ? (
+                // /shop/:slug/orders -> search orders in my shop
+                <input
+                  type="search"
+                  value={searchQ}
+                  onChange={(e) => updateSearchQuery(e.target.value)}
+                  placeholder="Search shop orders…"
+                  style={{
+                    width: "100%",
+                    border: "none",
+                    outline: "none",
+                    background: "transparent",
+                    fontSize: 14,
+                  }}
+                />
+              ) : isOwnerCategories ? (
+                // /shop/:slug/categories -> search categories
+                <input
+                  type="search"
+                  value={searchQ}
+                  onChange={(e) => updateSearchQuery(e.target.value)}
+                  placeholder="Search categories…"
+                  style={{
+                    width: "100%",
+                    border: "none",
+                    outline: "none",
+                    background: "transparent",
+                    fontSize: 14,
+                  }}
+                />
+              ) : isOwnerInvitations ? (
+                // /shop/:slug/invitations -> search members / roles
+                <input
+                  type="search"
+                  value={searchQ}
+                  onChange={(e) => updateSearchQuery(e.target.value)}
+                  placeholder="Search members & roles…"
+                  style={{
+                    width: "100%",
+                    border: "none",
+                    outline: "none",
+                    background: "transparent",
+                    fontSize: 14,
+                  }}
+                />
+              ) : isBuyerOrdersList ? (
+                // /s/:slug/orders -> buyer orders (previous step)
+                <input
+                  type="search"
+                  value={searchQ}
+                  onChange={(e) => updateSearchQuery(e.target.value)}
+                  placeholder="Search your orders…"
+                  style={{
+                    width: "100%",
+                    border: "none",
+                    outline: "none",
+                    background: "transparent",
+                    fontSize: 14,
+                  }}
+                />
+              ) : isBuyerCart ? (
+                // /s/:slug/cart -> buyer cart (previous step)
+                <input
+                  type="search"
+                  value={searchQ}
+                  onChange={(e) => updateSearchQuery(e.target.value)}
+                  placeholder="Search in cart…"
+                  style={{
+                    width: "100%",
+                    border: "none",
+                    outline: "none",
+                    background: "transparent",
+                    fontSize: 14,
+                  }}
+                />
+              ) : isFavorites ? (
+                // /favorites -> filter universal favorites
+                <input
+                  type="search"
+                  value={searchQ}
+                  onChange={(e) => updateSearchQuery(e.target.value)}
+                  placeholder="Search favorites…"
+                  style={{
+                    width: "100%",
+                    border: "none",
+                    outline: "none",
+                    background: "transparent",
+                    fontSize: 14,
+                  }}
+                />
+              ) : (
+                // Default: product search (universal / owner / buyer)
+                <SearchBox
+                  scope={productScope}
+                  tenantSlug={productTenantSlug}
+                  placeholder={
+                    isUniversalSection
+                      ? "Search products…"
+                      : inOwnerShop
+                      ? "Search products in this shop…"
+                      : inBuyerShop
+                      ? "Search this shop…"
+                      : "Search…"
                   }
-                }}
-              />
+                  onSubmit={(q) => {
+                    nav(`${productBasePath}?q=${encodeURIComponent(q)}`);
+                  }}
+                  onSelectItem={(it) => {
+                    if (productScope === "universal") {
+                      nav(`/universal/p/${it.id}`);
+                    } else if (productScope === "buyer" && productTenantSlug) {
+                      nav(`/s/${productTenantSlug}/p/${it.id}`);
+                    } else if (productScope === "owner" && productTenantSlug) {
+                      nav(`/shop/${productTenantSlug}/p/${it.id}`);
+                    } else {
+                      nav(
+                        `${productBasePath}?q=${encodeURIComponent(
+                          it.title || ""
+                        )}`
+                      );
+                    }
+                  }}
+                />
+              )}
             </div>
           </div>
         </div>
+
 
         {/* Right side: favorites in universal, cart in buyer */}
         {rightOverride ? (

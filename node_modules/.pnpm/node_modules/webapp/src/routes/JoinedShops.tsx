@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { api } from "../lib/api/index";
 
 type Tenant = {
@@ -23,6 +23,20 @@ export default function JoinedShops() {
   const [loading, setLoading] = useState(true);
   const [joined, setJoined] = useState<Tenant[]>([]);
   const [err, setErr] = useState<string | null>(null);
+
+  const loc = useLocation();
+
+  const params = new URLSearchParams(loc.search || "");
+  const q = (params.get("q") || "").trim().toLowerCase();
+
+  const filteredJoined = !q
+    ? joined
+    : joined.filter((t) => {
+        const name = (t.name || "").toLowerCase();
+        const slug = (t.slug || "").toLowerCase();
+        return name.includes(q) || slug.includes(q);
+      });
+
 
   useEffect(() => {
     let mounted = true;
@@ -66,30 +80,78 @@ export default function JoinedShops() {
     );
   }
 
-  return (
+    return (
     <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-      {joined.map((t) => (
-        <button
-          key={t.id}
-          onClick={() => nav(`/s/${t.slug}`)}
+      {filteredJoined.length === 0 ? (
+        <div
           style={{
-            background: "#fff",
             border: "1px solid rgba(0,0,0,.06)",
             borderRadius: 12,
-            padding: 12,
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            textAlign: "left",
-            cursor: "pointer",
+            padding: 16,
+            opacity: 0.7,
           }}
         >
-          <Avatar name={t.name} url={t.logoWebUrl || null} />
-          <div style={{ fontWeight: 600 }}>{t.name}</div>
-        </button>
-      ))}
+          No shops match your search.
+        </div>
+          ) : (
+      filteredJoined.map((t) => {
+        const initials = (t.name || t.slug || "?")
+          .split(" ")
+          .map((part) => part[0])
+          .join("")
+          .slice(0, 2)
+          .toUpperCase();
+
+        return (
+          <button
+            key={t.id}
+            onClick={() => nav(`/s/${t.slug}`)}
+            style={{
+              background: "#fff",
+              border: "1px solid rgba(0,0,0,.06)",
+              borderRadius: 12,
+              padding: 12,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              textAlign: "left",
+              cursor: "pointer",
+            }}
+          >
+            {/* avatar circle */}
+            <div
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: "50%",
+                border: "1px solid rgba(0,0,0,.06)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 14,
+                fontWeight: 600,
+                background: "rgba(0,0,0,.02)",
+              }}
+            >
+              {initials}
+            </div>
+
+            {/* text */}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 600, fontSize: 14, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>
+                {t.name || "Unnamed shop"}
+              </div>
+              <div style={{ fontSize: 12, opacity: 0.7 }}>
+                @{t.slug}
+              </div>
+            </div>
+          </button>
+        );
+      })
+    )}
     </div>
   );
+
 }
 
 function Avatar({ name, url }: { name: string; url: string | null }) {

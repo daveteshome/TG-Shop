@@ -1,6 +1,6 @@
 // apps/webapp/src/routes/ShopInvitations.tsx
 import React from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useLocation } from "react-router-dom";
 import { api } from "../lib/api/index";
 import { useAsync } from "../lib/hooks/useAsync";
 import { TopBar } from "../components/layout/TopBar";
@@ -61,6 +61,30 @@ export default function ShopInvitations() {
 
   const data = q.data;
 
+    const loc = useLocation();
+
+  const params = new URLSearchParams(loc.search || "");
+  const searchQ = (params.get("q") || "").trim().toLowerCase();
+
+  const filteredMembers =
+    !data || !searchQ
+      ? data?.members || []
+      : data.members.filter((m) => {
+          const u = m.user;
+          const haystack =
+            (u.name || "") +
+            " " +
+            (u.username || "") +
+            " " +
+            (u.tgId || "") +
+            " " +
+            (m.role || "") +
+            " " +
+            new Date(m.createdAt).toLocaleDateString();
+          return haystack.toLowerCase().includes(searchQ);
+        });
+
+
   return (
     <div>
       <TopBar title="Invitations & Roles" />
@@ -79,9 +103,16 @@ export default function ShopInvitations() {
             </div>
           )}
 
-          {data.members.length > 0 && (
+          {data.members.length > 0 && filteredMembers.length === 0 && (
+            <div style={{ fontSize: 13, opacity: 0.7 }}>
+              No members match your search.
+            </div>
+          )}
+
+          {filteredMembers.length > 0 && (
             <div style={{ display: "grid", gap: 8 }}>
-              {data.members.map((m) => {
+              {filteredMembers.map((m) => {
+
                 const u = m.user;
                 const displayName =
                   u.name || u.username || u.tgId || "(unknown user)";
@@ -93,6 +124,13 @@ export default function ShopInvitations() {
                   day: "numeric",
                 });
 
+                const initials = (u.name || u.username || u.tgId || "?")
+                  .split(" ")
+                  .map((part) => part[0])
+                  .join("")
+                  .slice(0, 2)
+                  .toUpperCase();
+
                 return (
                   <div
                     key={m.id}
@@ -101,66 +139,62 @@ export default function ShopInvitations() {
                       border: "1px solid rgba(0,0,0,.08)",
                       padding: 10,
                       display: "flex",
-                      alignItems: "center",
                       gap: 10,
+                      alignItems: "center",
                     }}
                   >
-                    {/* Simple circle avatar (we can later plug profile avatar here) */}
+                    {/* avatar circle */}
                     <div
                       style={{
                         width: 36,
                         height: 36,
                         borderRadius: "50%",
-                        background: "rgba(0,0,0,.05)",
+                        background: "rgba(0,0,0,.04)",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        fontSize: 14,
+                        fontSize: 13,
                         fontWeight: 600,
                       }}
                     >
-                      {displayName.charAt(0).toUpperCase()}
+                      {initials}
                     </div>
 
+                    {/* text */}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div
                         style={{
-                          fontSize: 14,
                           fontWeight: 600,
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
+                          fontSize: 14,
                           whiteSpace: "nowrap",
+                          textOverflow: "ellipsis",
+                          overflow: "hidden",
                         }}
                       >
                         {displayName}
                       </div>
-                      <div style={{ fontSize: 12, opacity: 0.7 }}>
-                        {u.username && <>@{u.username} · </>}
-                        {u.phone || "no phone"}
-                      </div>
-                    </div>
-
-                    <div style={{ textAlign: "right", fontSize: 11 }}>
                       <div
                         style={{
-                          padding: "2px 6px",
-                          borderRadius: 999,
-                          border: "1px solid rgba(0,0,0,.15)",
+                          fontSize: 12,
+                          opacity: 0.7,
                           textTransform: "capitalize",
-                          marginBottom: 4,
                         }}
                       >
                         {roleLabel}
                       </div>
-                      <div style={{ opacity: 0.6 }}>Joined {joinedStr}</div>
+                      <div style={{ fontSize: 11, opacity: 0.6 }}>
+                        Joined {joinedStr}
+                      </div>
                     </div>
                   </div>
                 );
+
               })}
             </div>
           )}
         </div>
       )}
+
     </div>
   );
 }

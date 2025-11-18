@@ -1,5 +1,5 @@
 import React from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { TopBar } from "../components/layout/TopBar";
 import { Loader } from "../components/common/Loader";
 import { ErrorView } from "../components/common/ErrorView";
@@ -38,18 +38,45 @@ export default function ShopOrders() {
 
   const [expandedStatus, setExpandedStatus] = React.useState<StatusKey | null>(null);
 
-  const groupedByStatus = React.useMemo(() => {
-    const byStatus: Record<string, Order[]> = {};
+  const loc = useLocation();
+
+  const params = new URLSearchParams(loc.search || "");
+  const searchQ = (params.get("q") || "").trim().toLowerCase();
+
+  const filteredList = React.useMemo(() => {
     const list = q.data || [];
+    if (!searchQ) return list;
+    return list.filter((o) => {
+      const id = o.id.toLowerCase();
+      const status = (o.status || "").toLowerCase();
+      const notes = String((o as any).notes || "").toLowerCase();
+      const addr = String((o as any).shippingAddress || "").toLowerCase();
+      const createdAtStr = new Date((o as any).createdAt || "").toLocaleString().toLowerCase();
+      return (
+        id.includes(searchQ) ||
+        status.includes(searchQ) ||
+        notes.includes(searchQ) ||
+        addr.includes(searchQ) ||
+        createdAtStr.includes(searchQ)
+      );
+    });
+  }, [q.data, searchQ]);
+
+
+    const groupedByStatus = React.useMemo(() => {
+    const byStatus: Record<string, Order[]> = {};
+    const list = filteredList;
     for (const o of list) {
       const key = (o.status as StatusKey) || "unknown";
       if (!byStatus[key]) byStatus[key] = [];
       byStatus[key].push(o);
     }
     return byStatus;
-  }, [q.data]);
+  }, [filteredList]);
+
 
   const hasAnyOrders = (q.data || []).length > 0;
+  const hasAnyVisibleOrders = filteredList.length > 0;
 
   return (
     <div>
@@ -57,13 +84,19 @@ export default function ShopOrders() {
 
       {q.loading ? <Loader /> : <ErrorView error={q.error} />}
 
-      {!q.loading && !q.error && !hasAnyOrders && (
-        <div style={{ opacity: 0.7, padding: 16 }}>No orders yet.</div>
-      )}
+            {!q.loading && !q.error && !hasAnyOrders && (
+              <div style={{ opacity: 0.7, padding: 16 }}>No orders yet.</div>
+            )}
 
-      {!q.loading && hasAnyOrders && (
-        <div>
-          {STATUS_SECTIONS.map(({ key, label }) => {
+            {!q.loading && hasAnyOrders && !hasAnyVisibleOrders && (
+              <div style={{ opacity: 0.7, padding: 16 }}>
+                No orders match your search.
+              </div>
+            )}
+
+            {!q.loading && hasAnyVisibleOrders && (
+              <div>
+                {STATUS_SECTIONS.map(({ key, label }) => {
             const list = groupedByStatus[key] || [];
             if (!list.length) return null;
 

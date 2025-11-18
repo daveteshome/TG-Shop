@@ -1,6 +1,6 @@
 // apps/webapp/src/routes/ShopList.tsx
 import React, { useEffect, useState, useRef, useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { api } from "../lib/api/index";
 import { getInitDataRaw } from "../lib/telegram";
 import { createTenantFull } from "../lib/api/index";
@@ -9,7 +9,7 @@ import { useTranslation } from "react-i18next";
 type Tenant = { id: string; slug: string; name: string; publicPhone?: string | null };
 
 export default function ShopList() {
-  const { t } = useTranslation();
+  const { t } = useTranslation(); 
 
   const [loading, setLoading] = useState(true);
   const [owned, setOwned] = useState<Tenant[]>([]);
@@ -27,6 +27,7 @@ export default function ShopList() {
 
   const logoInputRef = useRef<HTMLInputElement | null>(null);
   const navigate = useNavigate();
+  const loc = useLocation();
 
   // Preview (small icon like in Settings)
   const logoPreviewUrl = useMemo(() => {
@@ -133,6 +134,18 @@ export default function ShopList() {
 
   const hasShops = owned.length > 0;
 
+  const params = new URLSearchParams(loc.search || "");
+  const q = (params.get("q") || "").trim().toLowerCase();
+
+  const filteredOwned = !q
+    ? owned
+    : owned.filter((s) => {
+        const name = (s.name || "").toLowerCase();
+        const slug = (s.slug || "").toLowerCase();
+        return name.includes(q) || slug.includes(q);
+      });
+
+
   return (
     <div style={{ padding: 12, display: "grid", gap: 14 }}>
       {/* Header: 🏪 My Shops + (+) */}
@@ -157,19 +170,28 @@ export default function ShopList() {
       </div>
 
       {/* list of shops */}
+            {/* list of shops */}
       {hasShops ? (
-        <ul style={list}>
-          {owned.map((s) => (
-            <li key={s.id}>
-              <button onClick={() => navigate(`/shop/${s.slug}`)} style={linkBtnButton}>
-                {s.name}
-              </button>
-            </li>
-          ))}
-        </ul>
+        filteredOwned.length === 0 ? (
+          <div style={muted}>No shops match your search.</div>
+        ) : (
+          <ul style={list}>
+            {filteredOwned.map((s) => (
+              <li key={s.id}>
+                <button
+                  onClick={() => navigate(`/shop/${s.slug}`)}
+                  style={linkBtnButton}
+                >
+                  {s.name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )
       ) : (
         <div style={muted}>You don’t own any shops yet.</div>
       )}
+
 
       {/* create form (match Shop Settings styling patterns) */}
       {showCreate && (

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { api } from "../lib/api/index";
 import { Loader } from "../components/common/Loader";
 import { ErrorView } from "../components/common/ErrorView";
@@ -17,6 +17,8 @@ type OrderRow = {
 export default function BuyerOrders() {
   const { slug } = useParams<{ slug: string }>();
   const nav = useNavigate();
+  const loc = useLocation();
+
 
   const [items, setItems] = useState<OrderRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -74,35 +76,69 @@ export default function BuyerOrders() {
     );
   }
 
+    // Filter by query from header (?q=...)
+  const params = new URLSearchParams(loc.search || "");
+  const q = (params.get("q") || "").trim().toLowerCase();
+  const hasFilter = q.length > 0;
+
+  const filteredItems = !hasFilter
+    ? items
+    : items.filter((o) => {
+        const short = (o.shortCode || "").toLowerCase();
+        const id = o.id.toLowerCase();
+        const status = o.status.toLowerCase();
+        const dateStr = new Date(o.createdAt).toLocaleString().toLowerCase();
+
+        return (
+          short.includes(q) ||
+          id.includes(q) ||
+          status.includes(q) ||
+          dateStr.includes(q)
+        );
+      });
+
+
   return (
     <div style={{ padding: 10, paddingBottom: 80 }}>
       <div style={{ fontWeight: 700, marginBottom: 8 }}>My Orders</div>
-      <div style={{ display: "grid", gap: 8 }}>
-        {items.map((o) => {
-          const short = o.shortCode || o.id.slice(0, 6);
-          const created = new Date(o.createdAt);
-          const dateStr = created.toLocaleString();
+              <div style={{ display: "grid", gap: 8 }}>
+        {filteredItems.length === 0 ? (
+          <div style={{ opacity: 0.7, fontSize: 13 }}>
+            No orders match your search.
+          </div>
+        ) : (
+          filteredItems.map((o) => {
+            const short = o.shortCode || o.id.slice(0, 6);
+            const created = new Date(o.createdAt);
+            const dateStr = created.toLocaleString();
 
-          return (
-            <button
-              key={o.id}
-              onClick={() => nav(`/s/${slug}/orders/${o.id}`)}
-              style={card}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ fontWeight: 700 }}>#{short}</span>
-                <span style={statusBadge(o.status)}>{o.status}</span>
-              </div>
-              <div style={{ marginTop: 4, fontSize: 12, opacity: 0.7 }}>
-                {dateStr}
-              </div>
-              <div style={{ marginTop: 6, fontWeight: 700 }}>
-                {money(Number(o.total || "0"), o.currency)}
-              </div>
-            </button>
-          );
-        })}
+            return (
+              <button
+                key={o.id}
+                onClick={() => nav(`/s/${slug}/orders/${o.id}`)}
+                style={card}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <span style={{ fontWeight: 700 }}>#{short}</span>
+                  <span style={statusBadge(o.status)}>{o.status}</span>
+                </div>
+                <div style={{ marginTop: 4, fontSize: 12, opacity: 0.7 }}>
+                  {dateStr}
+                </div>
+                <div style={{ marginTop: 6, fontWeight: 700 }}>
+                  {money(Number(o.total || "0"), o.currency)}
+                </div>
+              </button>
+            );
+          })
+        )}
       </div>
+
     </div>
   );
 }
