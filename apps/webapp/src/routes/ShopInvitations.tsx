@@ -1,8 +1,7 @@
 // apps/webapp/src/routes/ShopInvitations.tsx
-import React from "react";
-import { useParams, useLocation } from "react-router-dom";
+import React, { useEffect, useState } from "react";
+import { useParams } from "react-router-dom";
 import { api } from "../lib/api/index";
-import { useAsync } from "../lib/hooks/useAsync";
 import { TopBar } from "../components/layout/TopBar";
 import { Loader } from "../components/common/Loader";
 import { ErrorView } from "../components/common/ErrorView";
@@ -21,11 +20,13 @@ type UserInfo = {
   avatarUrl?: string | null;
 };
 
+type ShopRole = "OWNER" | "HELPER" | "COLLABORATOR" | "MEMBER";
+
 type Member = {
   id: string;
   tenantId: string;
   userId: string;
-  role: string;
+  role: ShopRole;
   createdAt: string;
   user: UserInfo;
 };
@@ -34,91 +35,157 @@ type MembersResponse = {
   members: Member[];
 };
 
+type LoadState =
+  | { status: "idle" | "loading" }
+  | { status: "error"; error: string }
+  | { status: "ready"; tenant: TenantInfo; members: Member[] };
+
+const ROLE_LABEL: Record<ShopRole, string> = {
+  OWNER: "Owner",
+  HELPER: "Helper",
+  COLLABORATOR: "Collaborator",
+  MEMBER: "Member",
+};
+
+const ROLE_OPTIONS: { value: ShopRole; label: string }[] = [
+  { value: "OWNER", label: "Owner" },
+  { value: "HELPER", label: "Helper" },
+  { value: "COLLABORATOR", label: "Collaborator" },
+  { value: "MEMBER", label: "Member" },
+];
+
 export default function ShopInvitations() {
   const { slug } = useParams<{ slug: string }>();
 
-  const q = useAsync(async () => {
+  const [state, setState] = useState<LoadState>({ status: "idle" });
+  const [expandedUserId, setExpandedUserId] = useState<string | null>(null);
+  const [savingUserId, setSavingUserId] = useState<string | null>(null);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  // Load tenant + members
+  useEffect(() => {
     if (!slug) {
-      throw new Error("Missing shop slug");
+      setState({ status: "error", error: "Missing shop slug" });
+      return;
     }
 
-    // 1) Load tenant by slug
-    const tenant = await api<TenantInfo>(`/shop/${slug}`);
+    let cancelled = false;
+    setState({ status: "loading" });
+    setExpandedUserId(null);
+    setLocalError(null);
 
-    // 2) Load members by tenantId
-    const { members } = await api<MembersResponse>(
-      `/tenants/${tenant.id}/members`
-    );
+    (async () => {
+      try {
+        const tenant = await api<TenantInfo>(`/shop/${slug}`);
+        const { members } = await api<MembersResponse>(
+          `/tenants/${tenant.id}/members`
+        );
 
-    // sort by createdAt (oldest first)
-    const sorted = [...members].sort(
-      (a, b) =>
-        new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-    );
+        const sorted = [...members].sort(
+          (a, b) =>
+            new Date(a.createdAt).getTime() -
+            new Date(b.createdAt).getTime()
+        );
 
-    return { tenant, members: sorted };
+        if (!cancelled) {
+          setState({ status: "ready", tenant, members: sorted });
+        }
+      } catch (e: any) {
+        if (cancelled) return;
+        const msg = e?.message || String(e);
+        setState({ status: "error", error: msg });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [slug]);
 
-  const data = q.data;
+  async function handleRoleChange(member: Member, newRole: ShopRole) {
+    if (state.status !== "ready") return;
+    if (member.role === newRole) return;
 
-    const loc = useLocation();
+    // Don't allow promoting to OWNER from here
+    if (newRole === "OWNER" && member.role !== "OWNER") {
+      setLocalError("Changing someone to OWNER is not allowed from here.");
+      return;
+    }
 
-  const params = new URLSearchParams(loc.search || "");
-  const searchQ = (params.get("q") || "").trim().toLowerCase();
+    setSavingUserId(member.userId);
+    setLocalError(null);
 
-  const filteredMembers =
-    !data || !searchQ
-      ? data?.members || []
-      : data.members.filter((m) => {
-          const u = m.user;
-          const haystack =
-            (u.name || "") +
-            " " +
-            (u.username || "") +
-            " " +
-            (u.tgId || "") +
-            " " +
-            (m.role || "") +
-            " " +
-            new Date(m.createdAt).toLocaleDateString();
-          return haystack.toLowerCase().includes(searchQ);
-        });
+    try {
+      const tenantId = state.tenant.id;
+      const payload = { role: newRole };
 
+      const res = await api<{ member: Member }>(
+        `/tenants/${tenantId}/members/${member.userId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
+
+      const updated = res.member;
+
+      setState((prev) => {
+        if (prev.status !== "ready") return prev;
+        return {
+          ...prev,
+          members: prev.members.map((m) =>
+            m.userId === updated.userId ? updated : m
+          ),
+        };
+      });
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      setLocalError(msg);
+    } finally {
+      setSavingUserId(null);
+    }
+  }
+
+  const loading = state.status === "idle" || state.status === "loading";
 
   return (
     <div>
       <TopBar title="Invitations & Roles" />
-      {q.loading && <div style={{ padding: 16 }}><Loader /></div>}
-      {!q.loading && <div style={{ padding: 16 }}><ErrorView error={q.error} /></div>}
 
-      {data && (
+      {loading && (
+        <div style={{ padding: 16 }}>
+          <Loader />
+        </div>
+      )}
+
+      {!loading && state.status === "error" && (
+        <div style={{ padding: 16 }}>
+          <ErrorView error={state.error} />
+        </div>
+      )}
+
+      {state.status === "ready" && (
         <div style={{ padding: 16, paddingTop: 0 }}>
           <div style={{ marginBottom: 12, fontSize: 14, opacity: 0.8 }}>
-            Team members for <b>{data.tenant.name}</b>
+            Members of <b>{state.tenant.name}</b>
           </div>
 
-          {data.members.length === 0 && (
+          {state.members.length === 0 && (
             <div style={{ fontSize: 13, opacity: 0.7 }}>
               No members yet. Later you can invite collaborators here.
             </div>
           )}
 
-          {data.members.length > 0 && filteredMembers.length === 0 && (
-            <div style={{ fontSize: 13, opacity: 0.7 }}>
-              No members match your search.
-            </div>
-          )}
-
-          {filteredMembers.length > 0 && (
+          {state.members.length > 0 && (
             <div style={{ display: "grid", gap: 8 }}>
-              {filteredMembers.map((m) => {
-
+              {state.members.map((m) => {
                 const u = m.user;
                 const displayName =
                   u.name || u.username || u.tgId || "(unknown user)";
-                const roleLabel = m.role.toLowerCase();
-                const joined = new Date(m.createdAt);
-                const joinedStr = joined.toLocaleDateString(undefined, {
+                const roleLabel = ROLE_LABEL[m.role] ?? m.role;
+                const created = new Date(m.createdAt);
+                const createdStr = created.toLocaleDateString(undefined, {
                   year: "numeric",
                   month: "short",
                   day: "numeric",
@@ -131,16 +198,24 @@ export default function ShopInvitations() {
                   .slice(0, 2)
                   .toUpperCase();
 
+                const isExpanded = expandedUserId === m.userId;
+
                 return (
                   <div
                     key={m.id}
+                    onClick={() =>
+                      setExpandedUserId(
+                        isExpanded ? null : m.userId
+                      )
+                    }
                     style={{
                       borderRadius: 10,
                       border: "1px solid rgba(0,0,0,.08)",
                       padding: 10,
                       display: "flex",
                       gap: 10,
-                      alignItems: "center",
+                      alignItems: "flex-start",
+                      cursor: "pointer",
                     }}
                   >
                     {/* avatar circle */}
@@ -153,48 +228,148 @@ export default function ShopInvitations() {
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        fontSize: 13,
+                        fontSize: 14,
                         fontWeight: 600,
+                        flexShrink: 0,
                       }}
                     >
                       {initials}
                     </div>
 
-                    {/* text */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ flex: 1 }}>
                       <div
                         style={{
                           fontWeight: 600,
                           fontSize: 14,
-                          whiteSpace: "nowrap",
-                          textOverflow: "ellipsis",
-                          overflow: "hidden",
+                          marginBottom: 2,
                         }}
                       >
                         {displayName}
                       </div>
+
                       <div
                         style={{
                           fontSize: 12,
                           opacity: 0.7,
-                          textTransform: "capitalize",
+                          marginBottom: 4,
                         }}
                       >
-                        {roleLabel}
+                        Role: <b>{roleLabel}</b> • Joined {createdStr}
                       </div>
-                      <div style={{ fontSize: 11, opacity: 0.6 }}>
-                        Joined {joinedStr}
-                      </div>
+
+                      {u.username && (
+                        <div
+                          style={{
+                            fontSize: 12,
+                            opacity: 0.7,
+                            marginBottom: 2,
+                          }}
+                        >
+                          @{u.username}
+                        </div>
+                      )}
+
+                      {u.phone && (
+                        <div
+                          style={{
+                            fontSize: 12,
+                            opacity: 0.7,
+                            marginBottom: 2,
+                          }}
+                        >
+                          Phone: {u.phone}
+                        </div>
+                      )}
+
+                      {isExpanded && (
+                        <div
+                          style={{
+                            marginTop: 8,
+                            paddingTop: 8,
+                            borderTop: "1px solid rgba(0,0,0,.05)",
+                            fontSize: 13,
+                          }}
+                        >
+                          <div
+                            style={{
+                              marginBottom: 6,
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 8,
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <span style={{ opacity: 0.7 }}>
+                              Change role:
+                            </span>
+                            <select
+                              value={m.role}
+                              disabled={savingUserId === m.userId}
+                              onClick={(e) => e.stopPropagation()}
+                              onChange={(e) =>
+                                handleRoleChange(
+                                  m,
+                                  e.target
+                                    .value as ShopRole
+                                )
+                              }
+                              style={{
+                                padding: "4px 8px",
+                                fontSize: 13,
+                              }}
+                            >
+                              {ROLE_OPTIONS.map((opt) => (
+                                <option
+                                  key={opt.value}
+                                  value={opt.value}
+                                  disabled={
+                                    opt.value === "OWNER" &&
+                                    m.role !== "OWNER"
+                                  }
+                                >
+                                  {opt.label}
+                                </option>
+                              ))}
+                            </select>
+
+                            {savingUserId === m.userId && (
+                              <span
+                                style={{
+                                  fontSize: 12,
+                                  opacity: 0.7,
+                                }}
+                              >
+                                Saving…
+                              </span>
+                            )}
+                          </div>
+
+                          {localError && (
+                            <div
+                              style={{
+                                color: "red",
+                                fontSize: 12,
+                              }}
+                            >
+                              {localError}
+                            </div>
+                          )}
+
+                          {/* Later we can add:
+                              - remove from shop
+                              - resend invite
+                              - permissions summary
+                           */}
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
-
               })}
             </div>
           )}
         </div>
       )}
-
     </div>
   );
 }

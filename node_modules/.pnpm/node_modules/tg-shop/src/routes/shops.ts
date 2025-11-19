@@ -2,13 +2,13 @@ import { Router } from "express";
 import { db } from "../lib/db";
 import { telegramAuth } from "../api/telegramAuth";
 
-const router = Router();
+const shopsRouter = Router();
 
 // All endpoints here require Telegram auth
-router.use(telegramAuth);
+shopsRouter.use(telegramAuth);
 
 // GET /api/shops/list  → returns { universal, myShops, joinedShops }
-router.get("/shops/list", async (req: any, res, next) => {
+shopsRouter.get("/shops/list", async (req: any, res, next) => {
   console.log("on routs.ts page 12 [/shops/list] userId=");
   try {
     const userId = req.userId!;
@@ -29,7 +29,7 @@ router.get("/shops/list", async (req: any, res, next) => {
 });
 
 // POST /api/tenants  { name }  → creates tenant and OWNER membership
-router.post("/tenants", async (req: any, res, next) => {
+shopsRouter.post("/tenants", async (req: any, res, next) => {
   try {
     const userId = req.userId!;
     const { name } = (req.body ?? {}) as { name: string };
@@ -51,4 +51,4 @@ router.post("/tenants", async (req: any, res, next) => {
   } catch (e) { next(e); }
 });
 
-export default router;
+export default shopsRouter;

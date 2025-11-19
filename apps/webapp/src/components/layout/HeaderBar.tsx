@@ -285,6 +285,17 @@ export default function HeaderBar({
     }
   }
 
+   // OWNER side drawer pages: /shop/:slug/(settings|categories|invitations|top-products) → back to shop root
+  {
+    const m = path.match(
+      /^\/shop\/([^/]+)\/(settings|categories|invitations|top-products)(?:\/|$)/
+    );
+    if (m) {
+      const slug = m[1];
+      nav(`/shop/${slug}`, { replace: true });
+      return;
+    }
+  }
 
   // Generic fallback
   nav("/universal", { replace: true });

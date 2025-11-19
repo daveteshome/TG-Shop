@@ -2,8 +2,9 @@ import { Router } from "express";
 import { db } from "../lib/db";
 import { publicImageUrl } from "../lib/r2";
 import { CatalogService } from "../services/catalog.service";
+import { extFromMime } from "./utils/ext";
 
-const router = Router();
+const universalRouter = Router();
 
 function buildWebUrlFromImage(im: any): string | null {
   if (!im) return null;
@@ -18,10 +19,9 @@ function buildWebUrlFromImage(im: any): string | null {
   return null;
 }
 
-
 // GET /api/universal/products/:id
 // GET /api/universal/products/:id
-router.get("/products/:id", async (req, res) => {
+universalRouter.get("/universal/products/:id", async (req, res) => {
   const id = req.params.id;
   if (!id) return res.status(400).json({ error: "Missing product ID" });
 
@@ -100,9 +100,7 @@ router.get("/products/:id", async (req, res) => {
   }
 });
 
-
-
-router.get("/products", async (req, res) => {
+universalRouter.get("/universal/products", async (req, res) => {
   const page = Math.max(1, Number(req.query.page ?? 1));
   const perPage = Math.min(50, Math.max(1, Number(req.query.perPage ?? 24)));
   const q = (req.query.q as string | undefined)?.trim() || undefined;
@@ -169,12 +167,12 @@ router.get("/products", async (req, res) => {
   }
 });
 
-router.get("/ping", (_req, res) => {
+universalRouter.get("/universal/ping", (_req, res) => {
   res.json({ ok: true, at: new Date().toISOString() });
 });
 
 
-router.get("/categories/with-counts", async (_req, res) => {
+universalRouter.get("/universal/categories/with-counts", async (_req, res) => {
   try {
     // 1) Get category nodes like buyer cascader (id, name, parentId, level, ...)
     const nodes = await CatalogService.listAllCategoriesForCascader();
@@ -257,5 +255,93 @@ router.get("/categories/with-counts", async (_req, res) => {
   }
 });
 
+// UNIVERSAL FEED
+universalRouter.get('/universal', async (req, res, next) => {
+  try {
+    const { q, categoryId, limit, cursor } = req.query as any;
 
-export default router;
+    // ✅ FIX: method is listUniversalFeed (not universalFeed)
+    const { items, nextCursor } = await CatalogService.listUniversalFeed({
+      q,
+      categoryId,
+      limit: limit ? Number(limit) : undefined,
+      cursor: cursor as string | undefined,
+    });
+
+    res.json({ items, nextCursor });
+  } catch (e) { next(e); }
+});
+
+// List universal products for a given category (for ProductDetail related in universal mode)
+universalRouter.get("/universal/category/:categoryId/products", async (req, res, next) => {
+  try {
+    const categoryId = String(req.params.categoryId);
+
+    const items = await db.product.findMany({
+      where: {
+        categoryId,
+        active: true,
+        publishToUniversal: true,
+        tenant: {
+          publishUniversal: true, // only from shops that are visible in universal
+        },
+      },
+      include: {
+        images: {
+          orderBy: { position: "asc" },
+          take: 1,
+          select: {
+            url: true,
+            imageId: true,
+            image: { select: { mime: true } }, // needed for extFromMime
+          },
+        },
+        tenant: {
+          select: {
+            id: true,
+            slug: true,
+            name: true,
+            publicPhone: true,
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const products = items.map((p) => {
+      const first = p.images?.[0];
+
+      // Build photoUrl exactly like other catalog endpoints
+      const mime = first?.image?.mime ?? undefined;
+      const r2Url = first?.imageId
+        ? publicImageUrl(first.imageId, extFromMime(mime))
+        : null;
+
+      const httpUrl =
+        first?.url && /^https?:\/\//i.test(first.url) ? first.url : null;
+
+      const photoUrl =
+        r2Url ??
+        httpUrl ??
+        `/api/products/${p.id}/image`; // universal fallback proxy
+
+      return {
+        id: p.id,
+        title: p.title,
+        description: p.description,
+        price: p.price,
+        currency: p.currency,
+        stock: p.stock ?? 0,
+        categoryId: p.categoryId,
+        photoUrl,
+        tenant: p.tenant,
+      };
+    });
+
+    res.json({ products });
+  } catch (err) {
+    next(err);
+  }
+});
+
+export default universalRouter;

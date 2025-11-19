@@ -3,8 +3,10 @@ import { Router } from "express";
 import { db } from "../lib/db";
 import { requireAuth, requireTenant } from "./_helpers";
 import { publicImageUrl } from "../lib/r2";
+import { telegramAuth } from "../api/telegramAuth";
 
 export const ordersRouter = Router();
+ordersRouter.use(telegramAuth);
 
 /**
  * Same idea as cart.ts / universal.ts

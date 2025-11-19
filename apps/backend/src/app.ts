@@ -4,6 +4,7 @@ import path from 'path';
 import helmet from 'helmet';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import type { Request } from 'express';
+import SearchRouter from "../src/services/search";
 
 import { bot } from './bot/bot';
 import { ENV } from './config/env';
@@ -18,18 +19,28 @@ import { registerCheckoutFlow } from './bot/handlers/user/checkout';
 import { registerCartHandlers } from './bot/handlers/user/cart';
 import { registerAdminProductPhoto } from './bot/handlers/admin/product_photo';
 
-import { api } from './api/routes';
-import { resolveTenant } from './middlewares/resolveTenant';
-import { tenantApi } from './routes/tenantApi';
-import { telegramAuth } from './api/telegramAuth'; // must set req.user = { tgId }
-import productsRouter from './routes/products';
-import universalRouter from "./routes/universal";
 
+import { resolveTenant } from './middlewares/resolveTenant';
+import { telegramAuth } from './api/telegramAuth'; // must set req.user = { tgId }
+import { api } from './api/routes';
+
+import { buyerOrdersRouter } from './routes/buyer.orders';
+import { cartRouter } from './routes/cart';
+import {checkoutRouter} from "./routes/checkout";
 import contactRouter from "./routes/contact";
+import membersRouter from "./routes/members";
+import { ordersRouter } from './routes/orders';
+import { ownerCategoriesRouter } from './routes/owner.categories';
+import { ownerOrdersRouter } from './routes/owner.orders';
+import { ownerProductsRouter } from './routes/owner.products';
+import { ownerShopsRouter } from './routes/owner.shop';
+import productsRouter from './routes/products';
+import { profileRouter } from './routes/profile';
+import {publicTenantRouter} from "./routes/publicTenant";
 import shopRouter from "./routes/shop";
 import shopsRouter from "./routes/shops";
-import membersRouter from "./routes/members";
-import { publicTenantRouter } from "./routes/publicTenant";
+import { tenantRouter } from "./routes/tenants";
+import universalRouter from "./routes/universal";
 
 export function createApp() {
   const app = express();
@@ -76,13 +87,25 @@ export function createApp() {
     }
   });
 
+ 
+
+
+
     // Mount API with limiter
     app.use('/api', apiLimiter);
     // --- Tenant-aware API (auth required) ---
     // Order matters: limiter above applies to this route because it shares the '/api' prefix.
-    app.use('/api/t/:slug', resolveTenant, telegramAuth, tenantApi);
+    app.use('/api/t/:slug', resolveTenant, telegramAuth, ordersRouter);
   // “Public” API that still requires Telegram auth (the router itself calls telegramAuth)
-    app.use('/api', api);
+    
+  // Global search (universal + owner)
+app.use('/api', SearchRouter);
+
+// Tenant-scoped search (if you use /api/s/:slug/search ...)
+app.use('/api/s/:slug', resolveTenant, SearchRouter);
+
+
+  app.use('/api', api);
 
   // Image proxy should be mounted directly at /api/products/* (your webapp links to this)
   app.use('/api/products', productsRouter);
@@ -93,7 +116,17 @@ export function createApp() {
   app.use('/api', shopsRouter);     // new: shops list + create tenant
   app.use('/api', membersRouter);   // new: invites + members mgmt
   app.use("/public", publicTenantRouter);
-  app.use('/api/universal', universalRouter);
+  app.use('/api', tenantRouter);
+  app.use('/api', profileRouter);
+  app.use('/api', ownerCategoriesRouter);
+  app.use('/api', ownerShopsRouter);
+  app.use('/api', ownerProductsRouter);
+  app.use('/api', ownerOrdersRouter);
+  app.use('/api', checkoutRouter);
+  app.use('/api', cartRouter);
+  app.use('/api', buyerOrdersRouter);
+  app.use('/api', universalRouter);
+  
 
 
   // ----- Telegram Bot -----

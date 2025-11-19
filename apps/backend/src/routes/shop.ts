@@ -2,14 +2,14 @@ import { Router } from "express";
 import { db } from "../lib/db";
 import { telegramAuth } from "../api/telegramAuth";
 
-const router = Router();
+const shopRouter = Router();
 
 // All endpoints here require Telegram auth
-router.use(telegramAuth);
+shopRouter.use(telegramAuth);
 
 // inside backend/src/api/shops.ts
 // backend/src/api/shops.ts (or wherever you put it)
-router.get("/shops/:slug/orders", async (req: any, res, next) => {
+shopRouter.get("/shops/:slug/orders", async (req: any, res, next) => {
   try {
     const userId = req.userId!;             // this is tgId from telegramAuth
     const slug = req.params.slug;
@@ -68,7 +68,7 @@ router.get("/shops/:slug/orders", async (req: any, res, next) => {
 
 
 // GET /api/shops/list  → returns { universal, myShops, joinedShops }
-router.get("/shops/list", async (req: any, res, next) => {
+shopRouter.get("/shops/list", async (req: any, res, next) => {
   console.log("on shop.ts line 71 [/shops/list] userId=");
   try {
     const userId = req.userId!;
@@ -89,7 +89,7 @@ router.get("/shops/list", async (req: any, res, next) => {
 });
 
 // POST /api/tenants  { name }  → creates tenant and OWNER membership
-router.post("/tenants", async (req: any, res, next) => {
+shopRouter.post("/tenants", async (req: any, res, next) => {
   try {
     const userId = req.userId!;
     const { name } = (req.body ?? {}) as { name: string };
@@ -111,4 +111,4 @@ router.post("/tenants", async (req: any, res, next) => {
   } catch (e) { next(e); }
 });
 
-export default router;
+export default shopRouter;

@@ -236,7 +236,44 @@ export default function Cart() {
 
           {/* keep your existing summary / totals block below,
               using `total` and `currency` as before */}
-          ...
+              <div
+      style={{
+        marginTop: 20,
+        padding: "16px",
+        borderRadius: 12,
+        border: "1px solid rgba(0,0,0,0.06)",
+        background: "#fff",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+      }}
+    >
+      <div>
+        <div style={{ fontSize: 12, opacity: 0.7 }}>Total</div>
+        <div style={{ fontSize: 18, fontWeight: 700 }}>
+          {money(total, currency)}
+        </div>
+      </div>
+
+      <button
+        onClick={() => {
+          if (slug) nav(`/s/${slug}/checkout`);
+          else nav("/checkout");
+        }}
+        style={{
+          background: "#000",
+          color: "#fff",
+          padding: "12px 20px",
+          borderRadius: 10,
+          border: "none",
+          fontSize: 15,
+          fontWeight: 600,
+          cursor: "pointer",
+        }}
+      >
+        Checkout
+      </button>
+    </div>
         </>
       )}
     </div>

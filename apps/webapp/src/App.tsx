@@ -51,43 +51,6 @@ const appStyle: React.CSSProperties = {
   boxSizing: "border-box",
 };
 
-/* ====================== Helpers ====================== */
-function OrdersRouter() {
-  const nav = useNavigate();
-
-  React.useEffect(() => {
-    let slug: string | null = null;
-
-    try {
-      // Prefer last OWNER shop page
-      const lastOwner = localStorage.getItem("tgshop:lastOwnerShopPage") || "";
-      const ownerMatch = lastOwner.match(/^\/shop\/([^/]+)/);
-      if (ownerMatch) {
-        slug = ownerMatch[1];
-      } else {
-        // Fallback to last buyer shop page
-        const lastShop = localStorage.getItem("tgshop:lastShopPage") || "";
-        const buyerMatch = lastShop.match(/^\/s\/([^/]+)/);
-        if (buyerMatch) {
-          slug = buyerMatch[1];
-        }
-      }
-    } catch {
-      // ignore
-    }
-
-    if (slug) {
-      // Go to combined Orders page for that shop
-      nav(`/shop/${slug}/orders`, { replace: true });
-    } else {
-      // If we really have no context, show joined shops instead of white screen
-      nav("/joined", { replace: true });
-    }
-  }, [nav]);
-
-  // Nothing to render; we just redirect
-  return null;
-}
 
 /** Normalize a react-router location for both BrowserRouter / HashRouter and /tma prefix */
 function routedPath(loc: ReturnType<typeof useLocation>): string {
@@ -273,20 +236,31 @@ function useAutoJoinAndResume() {
 
     (async () => {
       try {
-        const res = await api<any>("/invites/accept", {
+                const res = await api<any>("/invites/accept", {
           method: "POST",
           body: JSON.stringify({ code }),
         });
         const slug = res?.tenant?.slug ?? res?.slug ?? null;
+        const role = (res as any)?.role ?? "MEMBER";
 
         if (slug) {
           sessionStorage.setItem(handledKey, "1"); // only after success
-          const target = `/shop/${slug}`;
 
-          // Seed list memory for owner/buyer contexts
+          // OWNER / ADMIN → owner view, others → buyer view
+          const target =
+            role === "OWNER" || role === "ADMIN"
+              ? `/shop/${slug}`
+              : `/s/${slug}`;
+
+          // Seed list memory correctly
           try {
-            localStorage.setItem("tgshop:lastShopPage", target);
-            localStorage.setItem("tgshop:lastShopPageAt", String(Date.now()));
+            if (role === "OWNER" || role === "ADMIN") {
+              localStorage.setItem("tgshop:lastOwnerShopPage", target);
+              localStorage.setItem("tgshop:lastOwnerShopPageAt", String(Date.now()));
+            } else {
+              localStorage.setItem("tgshop:lastShopPage", target);
+              localStorage.setItem("tgshop:lastShopPageAt", String(Date.now()));
+            }
           } catch {}
 
           if (routedPathFromWindow() !== target) {
@@ -295,6 +269,7 @@ function useAutoJoinAndResume() {
         } else {
           tryResumePolitely();
         }
+
       } catch {
         tryResumePolitely();
       }
@@ -307,10 +282,17 @@ function useAutoJoinAndResume() {
 export default function App() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false); // Global profile drawer
+  const profileJustClosedAt = React.useRef(0);           // 🔹 track last close time
   const [didRestore, setDidRestore] = useState(false);
   const [menuOpen, setMenuOpen] = React.useState(false);
   const loc = useLocation();
   const nav = useNavigate();
+
+    const handleCloseProfile = () => {
+    profileJustClosedAt.current = Date.now();
+    setProfileOpen(false);
+  };
+
 
   // Memory: keep BOTH behaviors
   useRememberExactPath();     // resume-after-close (detail or list)
@@ -387,13 +369,20 @@ export default function App() {
   }, []);
 
   // Global: open the profile drawer when header avatar is clicked
+    // Global: open the profile drawer when header avatar is clicked
   useEffect(() => {
-    function onOpenShopMenu() {
-      setProfileOpen(true);
-    }
-    window.addEventListener("tgshop:open-shop-menu", onOpenShopMenu);
-    return () => window.removeEventListener("tgshop:open-shop-menu", onOpenShopMenu);
-  }, []);
+      function onOpenShopMenu() {
+        const now = Date.now();
+        // 🔹 Ignore opens that happen immediately after a close (ghost tap)
+        if (now - profileJustClosedAt.current < 400) {
+          return;
+        }
+        setProfileOpen(true);
+      }
+      window.addEventListener("tgshop:open-shop-menu", onOpenShopMenu);
+      return () => window.removeEventListener("tgshop:open-shop-menu", onOpenShopMenu);
+    }, []);
+
 
   // (Kept) Restore last path once (but skip if a join was handled)
   useEffect(() => {
@@ -491,10 +480,13 @@ export default function App() {
   };
 
   // Reusable avatar button (uses shop logo/name)
+      // Reusable avatar button (uses shop logo/name)
   const avatarBtn = (
     <button
       aria-label="Shop profile"
-      onClick={() => window.dispatchEvent(new CustomEvent("tgshop:open-shop-menu"))}
+      onClick={() =>
+        window.dispatchEvent(new CustomEvent("tgshop:open-shop-menu"))
+      }
       style={{
         width: 34,
         height: 34,
@@ -511,12 +503,17 @@ export default function App() {
         cursor: "pointer",
         fontSize: 12,
         fontWeight: 600,
+        // 🔑 CRITICAL: while profile drawer is open, ignore taps on avatar
+        pointerEvents: profileOpen ? "none" : "auto",
       }}
       title="Shop profile"
     >
-      {!shopCtx.logoWebUrl && (shopCtx.name ? shopCtx.name.slice(0, 1).toUpperCase() : "D")}
+      {!shopCtx.logoWebUrl &&
+        (shopCtx.name ? shopCtx.name.slice(0, 1).toUpperCase() : "D")}
     </button>
   );
+
+
 
   // Right side overrides
   const rightForShopRoot = (
@@ -591,7 +588,7 @@ export default function App() {
 
           <ShopProfileDrawer
             open={profileOpen}
-            onClose={() => setProfileOpen(false)}
+            onClose={handleCloseProfile}
             tenant={{
               name: shopCtx.name ?? null,
               slug: shopCtx.slug ?? (routedPath(loc).match(/^\/shop\/([^/]+)/)?.[1] ?? null),

@@ -1,3 +1,4 @@
+// apps/webapp/src/components/common/RightDrawer.tsx
 import React, { useEffect } from "react";
 import { lockScroll, unlockScroll } from "../../lib/dom/scrollLock";
 
@@ -17,52 +18,66 @@ export default function RightDrawer({
   children,
 }: RightDrawerProps) {
   useEffect(() => {
-    if (open) lockScroll();
-    return () => unlockScroll();
+    if (open) {
+      lockScroll();
+    } else {
+      unlockScroll();
+    }
+    return () => {
+      unlockScroll();
+    };
   }, [open]);
+
+  if (!open) return null;
+
+  // 🔑 Close on pointer/touch start, not on click, to avoid ghost taps
+  const handleBackdropPointerDown = (
+    e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>
+  ) => {
+    e.stopPropagation();
+    e.preventDefault();
+    onClose();
+  };
 
   return (
     <>
-      {open && (
-        <div
-          onClick={onClose}
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,.35)",
-            zIndex: 100,
-            // Prevent rubber-band scrolling on iOS behind the sheet
-            overscrollBehavior: "contain",
-          }}
-        />
-      )}
-
+      {/* Backdrop – eats the interaction BEFORE the browser fires a synthetic click */}
       <div
-        role="dialog"
-        aria-hidden={!open}
+        onMouseDown={handleBackdropPointerDown}
+        onTouchStart={handleBackdropPointerDown}
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(15, 23, 42, 0.35)",
+          zIndex: 999,
+          pointerEvents: "auto",
+        }}
+      />
+
+      {/* Right drawer */}
+      <div
+        onClick={(e) => {
+          // keep clicks inside drawer from bubbling up
+          e.stopPropagation();
+        }}
         style={{
           position: "fixed",
           top: 0,
           right: 0,
-          height: "100vh",
+          bottom: 0,
           width,
           maxWidth,
+          zIndex: 1000,
           background: "#fff",
-          borderLeft: "1px solid rgba(0,0,0,.1)",
-          boxShadow: open ? "-3px 0 12px rgba(0,0,0,.25)" : "none",
-          transform: open ? "translateX(0)" : "translateX(110%)",
-          transition: "transform 0.2s ease-out",
-          zIndex: 101,
+          boxShadow: "-4px 0 12px rgba(15, 23, 42, 0.18)",
           display: "flex",
           flexDirection: "column",
-          // Ensure the drawer itself scrolls, not the page
           overflow: "hidden",
           overscrollBehavior: "contain",
           borderTopLeftRadius: 12,
           borderBottomLeftRadius: 12,
         }}
       >
-        {/* Make inner content scrollable */}
         <div style={{ flex: 1, overflowY: "auto" }}>{children}</div>
       </div>
     </>

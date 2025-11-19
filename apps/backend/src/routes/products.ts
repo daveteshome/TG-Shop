@@ -3,6 +3,7 @@ import { Router } from "express";
 import { Readable } from "node:stream";
 import { db } from "../lib/db";
 import { publicImageUrl } from "../lib/r2";   // <-- you already have this
+
 export const productsRouter = Router();
 
 const BOT_TOKEN = process.env.BOT_TOKEN || "";

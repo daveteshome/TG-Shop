@@ -1,233 +1,177 @@
 // apps/backend/src/routes/cart.ts
-import { Router } from "express";
-import { Prisma } from "@prisma/client";
-import { db } from "../lib/db";
-import { dec, requireAuth, requireTenant } from "./_helpers";
-import { publicImageUrl } from "../lib/r2";
+// apps/backend/src/server/routes.ts
+import { Router } from 'express';
+import { telegramAuth } from '../api/telegramAuth';
+import { CartService } from '../services/cart.service';
+import { db } from '../lib/db';
+
+import {Readable } from "node:stream";
+import { publicImageUrl } from "../lib/r2"; // <-- adjust ../ if your path differs
+import { getTenantId, getTenantSlugFromReq } from '../services/tenant.util';
+import { extFromMime } from "./utils/ext";
+
 
 export const cartRouter = Router();
+cartRouter.use(telegramAuth);
 
-async function getOrCreateCart(tenantId: string, userId: string) {
-  return db.cart.upsert({
-    where: { tenantId_userId: { tenantId, userId } },
-    update: { updatedAt: new Date() },
-    create: { tenantId, userId },
-    select: { id: true, tenantId: true, userId: true },
-  });
-}
+cartRouter.get("/products/:id/image", async (req, res) => {
+  const id = req.params.id;
 
-function buildWebUrlFromImage(im: any): string | null {
-  if (!im) return null;
-
-  // R2-style: imageId + mime → publicImageUrl
-  if (im.imageId) {
-    const mime = im.image?.mime?.toLowerCase?.() || "";
-    let ext: "jpg" | "png" | "webp" = "jpg";
-    if (mime.includes("png")) ext = "png";
-    else if (mime.includes("webp")) ext = "webp";
-    return publicImageUrl(im.imageId, ext);
-  }
-
-  // Fallback: direct URL fields if they exist
-  if (im.webUrl) return im.webUrl;
-  if (im.url) return im.url;
-
-  return null;
-}
-async function serializeCart(cartId: string) {
-  const items = await db.cartItem.findMany({
-    where: { cartId },
-    include: {
-      product: {
-        select: {
-          title: true,
-          currency: true,
-          price: true,
-          images: {
-            take: 1,
-            orderBy: { position: "asc" },
-            include: { image: true },   // 👈 REQUIRED !!! 
+  try {
+    const p = await db.product.findFirst({
+      where: { id, active: true },
+      include: {
+        images: {
+          orderBy: { position: "asc" },
+          take: 1,
+          select: {
+            imageId: true,
+            image: { select: { mime: true } },
           },
         },
       },
-      variant: { select: { name: true } },
-    },
-    orderBy: { createdAt: "asc" },
+    });
+
+    if (!p) {
+      console.warn("[image:route] product not found or inactive", { productId: id });
+      return res.status(404).send(`Product not found or inactive: ${id}`);
+    }
+
+    const im = p.images?.[0];
+    if (!im?.imageId) {
+      console.warn("[image:route] no imageId for product", { productId: id });
+      return res.status(404).send(`No image for product: ${id}`);
+    }
+
+    const ext = extFromMime(im.image?.mime);
+    const url = publicImageUrl(im.imageId, ext);
+
+    const r2 = await fetch(url);
+    if (!r2.ok) {
+      const t = await r2.text().catch(() => "");
+      console.error("[image:route] r2 fetch failed", {
+        status: r2.status,
+        body: t.slice(0, 200),
+        url,
+      });
+      return res.status(502).send("R2 fetch failed");
+    }
+
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    res.setHeader("Content-Type", r2.headers.get("content-type") || "image/jpeg");
+
+    const body: any = r2.body;
+    if (body && typeof (Readable as any).fromWeb === "function") {
+      return (Readable as any).fromWeb(body).pipe(res);
+    }
+
+    const buf = Buffer.from(await r2.arrayBuffer());
+    res.setHeader("Content-Length", String(buf.length));
+    return res.end(buf);
+  } catch (err: any) {
+    console.error("[image:route] error", {
+      productId: id,
+      err: err?.message,
+      stack: err?.stack,
+    });
+    return res.status(500).send(`image proxy error: ${err?.message ?? String(err)}`);
+  }
+});
+
+cartRouter.delete("/cart/items/:itemId", async (req: any, res) => {
+  const userId = req.userId!;
+  const slug = getTenantSlugFromReq(req);
+  if (!slug) return res.status(400).json({ error: "tenant_slug_required" });
+
+  const tenantId = await getTenantId(slug);
+  const itemId = req.params.itemId;
+
+  // Ensure item belongs to the same user + tenant
+  const item = await db.cartItem.findFirst({
+    where: { id: itemId },
+    include: { cart: true },
   });
 
-  const rows = items.map((ci) => {
-    const cover = ci.product.images[0] ?? null;
+  if (!item || item.cart.userId !== userId || item.cart.tenantId !== tenantId) {
+    return res.status(404).json({ error: "item_not_found" });
+  }
 
-    // ---- BUILD R2 URL EXACTLY LIKE Universal/ShopBuyer ----
-    let thumbUrl: string | null = null;
-    if (cover?.imageId) {
-      const mime = cover.image?.mime?.toLowerCase?.() || "";
-      let ext: "jpg" | "png" | "webp" = "jpg";
-      if (mime.includes("png")) ext = "png";
-      else if (mime.includes("webp")) ext = "webp";
+  // Delete the item
+  await db.cartItem.delete({ where: { id: itemId } });
 
-      thumbUrl = publicImageUrl(cover.imageId, ext);
-    }
+  // Return updated cart
+  const cart = await CartService.list(userId, tenantId);
+  return res.json(cart || { id: null, userId, items: [] });
+});
 
-    return {
-      id: ci.id,
-      productId: ci.productId,
-      variantId: ci.variantId,
-      title: ci.product.title,
-      variantName: ci.variant?.name ?? null,
-      quantity: ci.quantity,
-      unitPrice: ci.unitPrice.toString(),
-      currency: ci.currency,
-      thumbUrl,   // 👈 NOW REALLY R2 URL
-    };
+
+cartRouter.patch("/cart/items/:itemId", async (req: any, res) => {
+  const userId = req.userId!;
+  const slug = getTenantSlugFromReq(req);
+
+  if (!slug) {
+    return res.status(400).json({ error: "tenant_slug_required" });
+  }
+
+  const tenantId = await getTenantId(slug);
+  const itemId = req.params.itemId;
+  const { qtyDelta } = (req.body ?? {}) as { qtyDelta?: number };
+
+  if (!qtyDelta) {
+    return res.status(400).json({ error: "qtyDelta_required" });
+  }
+
+  // Load item and ensure ownership
+  const item = await db.cartItem.findFirst({
+    where: { id: itemId },
+    include: { cart: true },
   });
 
-  const subtotal = rows.reduce(
-    (acc, r) => acc.add(r.unitPrice),
-    new Prisma.Decimal(0)
-  );
-
-  return { items: rows, subtotal: subtotal.toString(), currency: rows[0]?.currency ?? "ETB" };
-}
-
-cartRouter.get("/", async (req, res, next) => {
-  try {
-    const tenantId = requireTenant(req);
-    const tgId = requireAuth(req);
-    const cart = await getOrCreateCart(tenantId, tgId);
-    const dto = await serializeCart(cart.id);
-    res.json({ id: cart.id, ...dto });
-  } catch (e) {
-    next(e);
+  if (!item || item.cart.userId !== userId || item.cart.tenantId !== tenantId) {
+    return res.status(404).json({ error: "item_not_found" });
   }
-});
 
-cartRouter.post("/items", async (req, res, next) => {
-  try {
-    const tenantId = requireTenant(req);
-    const tgId = requireAuth(req);
-    const { productId, variantId, qty } = (req.body ?? {}) as {
-      productId: string;
-      variantId?: string | null;
-      qty?: number;
-    };
-    const quantity = Math.max(1, Math.min(99, Number(qty || 1)));
-
-    const product = await db.product.findFirst({
-      where: { id: productId, tenantId, active: true },
-    });
-    if (!product)
-      return res
-        .status(404)
-        .json({ error: "Product not found", code: "PRODUCT_NOT_FOUND" });
-
-    let stock = product.stock;
-    let price = product.price;
-    if (variantId) {
-      const v = await db.productVariant.findFirst({
-        where: { id: variantId, productId, tenantId },
-      });
-      if (!v)
-        return res
-          .status(404)
-          .json({ error: "Variant not found", code: "VARIANT_NOT_FOUND" });
-      stock = v.stock;
-      if (v.priceDiff) price = price.add(v.priceDiff);
-    }
-
-    if (quantity > stock)
-      return res
-        .status(400)
-        .json({ error: "Insufficient stock", code: "OUT_OF_STOCK" });
-
-    const cart = await getOrCreateCart(tenantId, tgId);
-
-    const existing = await db.cartItem.findFirst({
-      where: { cartId: cart.id, productId, variantId: variantId ?? null },
-    });
-
-    if (existing) {
-      const newQty = Math.min(existing.quantity + quantity, stock);
-      await db.cartItem.update({
-        where: { id: existing.id },
-        data: { quantity: newQty },
-      });
+  if (qtyDelta > 0) {
+    // increase quantity
+    await CartService.inc(itemId);
+  } else {
+    // qtyDelta < 0
+    if (item.quantity <= 1) {
+      // remove item
+      await db.cartItem.delete({ where: { id: itemId } });
     } else {
-      await db.cartItem.create({
-        data: {
-          tenantId,
-          cartId: cart.id,
-          productId,
-          variantId: variantId ?? null,
-          quantity,
-          unitPrice: price,
-          currency: product.currency,
-        },
-      });
+      // decrease quantity
+      await CartService.dec(itemId);
     }
-
-    const dto = await serializeCart(cart.id);
-    res.json({ id: cart.id, ...dto });
-  } catch (e) {
-    next(e);
   }
+
+  const cart = await CartService.list(userId, tenantId);
+  return res.json(cart || { id: null, userId, items: [] });
 });
 
-cartRouter.patch("/items/:itemId", async (req, res, next) => {
-  try {
-    const tenantId = requireTenant(req);
-    const tgId = requireAuth(req);
-    const { qty } = (req.body ?? {}) as { qty: number };
-    const itemId = req.params.itemId;
 
-    const item = await db.cartItem.findFirst({
-      where: { id: itemId },
-      include: { cart: true, variant: true, product: true },
-    });
-    if (!item || item.cart.userId !== tgId || item.cart.tenantId !== tenantId) {
-      return res
-        .status(404)
-        .json({ error: "Not found", code: "CART_ITEM_NOT_FOUND" });
-    }
+// GET /api/cart
+// GET /api/cart
+cartRouter.get("/cart", async (req: any, res) => {
+  const userId = req.userId!;
+  const slug = getTenantSlugFromReq(req);
+  if (!slug) return res.status(400).json({ error: "tenant_slug_required" });
 
-    if (!qty || qty <= 0) {
-      await db.cartItem.delete({ where: { id: item.id } });
-    } else {
-      const stock = item.variantId ? item.variant!.stock : item.product.stock;
-      const newQty = Math.min(qty, stock);
-      await db.cartItem.update({
-        where: { id: item.id },
-        data: { quantity: newQty },
-      });
-    }
-
-    const dto = await serializeCart(item.cartId);
-    res.json({ id: item.cartId, ...dto });
-  } catch (e) {
-    next(e);
-  }
+  const tenantId = await getTenantId(slug);
+  const cart = await CartService.list(userId, tenantId);
+  return res.json(cart || { id: null, userId, items: [] });
 });
 
-cartRouter.delete("/items/:itemId", async (req, res, next) => {
-  try {
-    const tenantId = requireTenant(req);
-    const tgId = requireAuth(req);
-    const itemId = req.params.itemId;
+// POST /api/cart/items
+cartRouter.post("/cart/items", async (req: any, res) => {
+  const userId = req.userId!;
+  const { productId, qty } = req.body || {};
+  if (!productId) return res.status(400).json({ error: "productId_required" });
 
-    const item = await db.cartItem.findFirst({
-      where: { id: itemId },
-      include: { cart: true },
-    });
-    if (!item || item.cart.userId !== tgId || item.cart.tenantId !== tenantId) {
-      return res
-        .status(404)
-        .json({ error: "Not found", code: "CART_ITEM_NOT_FOUND" });
-    }
+  const slug = getTenantSlugFromReq(req);
+  if (!slug) return res.status(400).json({ error: "tenant_slug_required" });
 
-    await db.cartItem.delete({ where: { id: item.id } });
-    const dto = await serializeCart(item.cartId);
-    res.json({ id: item.cartId, ...dto });
-  } catch (e) {
-    next(e);
-  }
+  const tenantId = await getTenantId(slug);
+  const cart = await CartService.add(userId, String(productId), Number(qty ?? 1), tenantId);
+  return res.json(cart);
 });

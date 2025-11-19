@@ -1,130 +1,66 @@
 import { Router } from "express";
-import { db } from "../lib/db";
-import { requireAuth, requireTenant, shortCode } from "./_helpers";
-import { Prisma, InventoryMoveType, OrderStatus } from "@prisma/client";
+import { getTenantId, getTenantSlugFromReq } from '../services/tenant.util';
+import { OrdersService } from '../services/orders.service';
+import { db } from '../lib/db';
 
 export const checkoutRouter = Router();
 
-checkoutRouter.post("/", async (req, res, next) => {
-  const tx = await db.$transaction.bind(db);
+
+// ---------- Checkout / Buy Now ----------
+checkoutRouter.post('/checkout', async (req: any, res) => {
+  const userId = req.userId!;
+  const { shippingAddress, note } = req.body || {};
+
   try {
-    const tenantId = requireTenant(req);
-    const tgId = requireAuth(req);
-
-    const { address, note, payment } = (req.body ?? {}) as {
-      address: { label?: string | null; line1: string; line2?: string | null; city: string; region?: string | null; country: string; postalCode?: string | null };
-      note?: string | null;
-      payment: { method: "COD" | "BANK"; ref?: string | null };
-    };
-
-    if (!address?.line1 || !address?.city || !address?.country) {
-      return res.status(422).json({ error: "Invalid address", code: "ADDRESS_INVALID" });
+    // 🔹 Resolve the tenant from slug (same idea as /cart)
+    const slug = getTenantSlugFromReq(req);
+    if (!slug) {
+      return res.status(400).json({ error: 'tenant_slug_required' });
     }
 
-    const cart = await db.cart.findUnique({
-      where: { tenantId_userId: { tenantId, userId: tgId } },
-      select: { id: true },
-    });
-    if (!cart) return res.status(400).json({ error: "Cart is empty", code: "CART_EMPTY" });
+    const tenantId = await getTenantId(slug);
 
-    // Load cart lines with pricing + stock
-    const lines = await db.cartItem.findMany({
-      where: { cartId: cart.id },
-      include: {
-        product: true,
-        variant: true,
-      },
-    });
-    if (lines.length === 0) return res.status(400).json({ error: "Cart is empty", code: "CART_EMPTY" });
+    // 🔹 Create order using the correct tenant
+    const order = await OrdersService.checkoutFromCartWithDetails(
+      userId,
+      { shippingAddress, note },
+      tenantId, // 👈 pass the tenant override
+    );
 
-    // Validate stock & compute totals
-    for (const li of lines) {
-      const stock = li.variantId ? li.variant!.stock : li.product.stock;
-      if (li.quantity > stock) return res.status(409).json({ error: "Stock changed", code: "OUT_OF_STOCK" });
-    }
-    const currency = lines[0].currency;
-    const total = lines.reduce((acc, li) => acc.add((li.unitPrice as unknown as Prisma.Decimal).mul(li.quantity)), new Prisma.Decimal(0));
-
-    // Upsert address (by unique [tenantId, userId, label])
-    const label = address.label ?? "Checkout";
-    const addr = await db.address.upsert({
-      where: { tenantId_userId_label: { tenantId, userId: tgId, label } },
-      update: {
-        line1: address.line1, line2: address.line2 ?? null, city: address.city,
-        region: address.region ?? null, country: address.country, postalCode: address.postalCode ?? null, isDefault: true,
-      },
-      create: {
-        tenantId, userId: tgId, label,
-        line1: address.line1, line2: address.line2 ?? null, city: address.city,
-        region: address.region ?? null, country: address.country, postalCode: address.postalCode ?? null, isDefault: true,
-      },
-    });
-
-    const result = await db.$transaction(async (prisma) => {
-      // Create order
-      const order = await prisma.order.create({
-        data: {
-          tenantId, userId: tgId,
-          status: OrderStatus.pending,
-          total, currency,
-          addressId: addr.id,
-          note: note ?? null,
-          shortCode: null,
-        },
-      });
-
-      // Items
-      await prisma.orderItem.createMany({
-        data: lines.map(li => ({
-          tenantId,
-          orderId: order.id,
-          productId: li.productId,
-          variantId: li.variantId ?? null,
-          quantity: li.quantity,
-          unitPrice: li.unitPrice,
-          currency: li.currency,
-          titleSnapshot: li.product.title,
-          variantSnapshot: li.variant?.name ?? null,
-        })),
-      });
-
-      // Inventory moves + stock decrement
-      for (const li of lines) {
-        await prisma.inventoryMove.create({
-          data: {
-            tenantId,
-            productId: li.productId,
-            kind: InventoryMoveType.OUT,
-            quantity: li.quantity,
-            reason: `order:${order.id}`,
-          },
-        });
-
-        if (li.variantId) {
-          await prisma.productVariant.update({ where: { id: li.variantId }, data: { stock: { decrement: li.quantity } } });
-        } else {
-          await prisma.product.update({ where: { id: li.productId }, data: { stock: { decrement: li.quantity } } });
-        }
-      }
-
-      // Clear cart
-      await prisma.cartItem.deleteMany({ where: { cartId: cart.id } });
-
-      // Short code
-      const sc = shortCode(order.id);
-      const updated = await prisma.order.update({ where: { id: order.id }, data: { shortCode: sc } });
-
-      return updated;
-    });
-
-    // Later: if BANK and `payment.ref` given, you can attach to PaymentIntent/TenantPayment as meta
+    // 🔹 Normalize response to what frontend expects
+    const total =
+      (order.total as any)?.toString
+        ? (order.total as any).toString()
+        : String(order.total);
 
     res.json({
-      orderId: result.id,
-      shortCode: result.shortCode,
-      status: result.status,
-      total: result.total.toString(),
-      currency,
+      orderId: order.id,
+      shortCode: order.shortCode ?? null,
+      status: order.status,
+      total,
+      currency: order.currency,
     });
-  } catch (e) { next(e); }
+  } catch (e: any) {
+    res.status(400).json({ error: e?.message || 'checkout failed' });
+  }
+});
+
+
+// Single-item flow but same validations live in OrdersService
+checkoutRouter.post('/buy-now', async (req: any, res) => {
+  const userId = req.userId!;
+  const { productId, shippingAddress, note } = req.body || {};
+  if (!productId) return res.status(400).json({ error: 'productId required' });
+  const p = await db.product.findUnique({ where: { id: String(productId) } });
+  if (!p || !p.active) return res.status(400).json({ error: 'product unavailable' });
+  try {
+    const order = await OrdersService.createSingleItemPending(
+   userId,
+   { id: p.id, title: p.title, price: p.price.toNumber(), currency: p.currency },
+   { shippingAddress, note }
+ );
+    res.json(order);
+  } catch (e: any) {
+    res.status(400).json({ error: e?.message || 'buy-now failed' });
+  }
 });
