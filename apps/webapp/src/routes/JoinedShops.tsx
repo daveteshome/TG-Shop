@@ -1,15 +1,15 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { api } from "../lib/api/index";
+import { TopBar } from "../components/layout/TopBar";
 
 type Tenant = {
   id: string;
   slug: string;
   name: string;
   publicPhone?: string | null;
-  // backend /shop/:slug also returns logoWebUrl, but /shops/list includes tenant: true from membership
-  // so logo may be missing here; we’ll render initials fallback.
   logoWebUrl?: string | null;
+  description?: string | null;
 };
 
 type ShopsPayload = {
@@ -25,7 +25,6 @@ export default function JoinedShops() {
   const [err, setErr] = useState<string | null>(null);
 
   const loc = useLocation();
-
   const params = new URLSearchParams(loc.search || "");
   const q = (params.get("q") || "").trim().toLowerCase();
 
@@ -36,7 +35,6 @@ export default function JoinedShops() {
         const slug = (t.slug || "").toLowerCase();
         return name.includes(q) || slug.includes(q);
       });
-
 
   useEffect(() => {
     let mounted = true;
@@ -54,108 +52,179 @@ export default function JoinedShops() {
         if (mounted) setLoading(false);
       }
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   if (loading) {
-    return <div style={{ padding: 16 }}>Loading…</div>;
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          background: "var(--tg-theme-secondary-bg-color,#f5f5f7)",
+        }}
+      >
+        <TopBar title="Shops you joined" />
+        <div style={{ padding: "12px 16px" }}>Loading…</div>
+      </div>
+    );
   }
+
   if (err) {
-    return <div style={{ padding: 16, color: "crimson" }}>{err}</div>;
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          background: "var(--tg-theme-secondary-bg-color,#f5f5f7)",
+        }}
+      >
+        <TopBar title="Shops you joined" />
+        <div style={{ padding: "12px 16px", color: "crimson" }}>{err}</div>
+      </div>
+    );
   }
+
   if (!joined.length) {
     return (
-      <div style={{ padding: 16 }}>
-        <div
-          style={{
-            background: "#fff",
-            border: "1px solid rgba(0,0,0,.06)",
-            borderRadius: 12,
-            padding: 16,
-          }}
-        >
-          You haven’t joined any shops yet.
+      <div
+        style={{
+          minHeight: "100vh",
+          background: "var(--tg-theme-secondary-bg-color,#f5f5f7)",
+        }}
+      >
+        <TopBar title="Shops you joined" />
+        <div style={{ padding: 16 }}>
+          <div
+            style={{
+              background: "#fff",
+              border: "1px solid rgba(0,0,0,.06)",
+              borderRadius: 16,
+              padding: 16,
+              fontSize: 14,
+              opacity: 0.85,
+            }}
+          >
+            You haven’t joined any shops yet.
+          </div>
         </div>
       </div>
     );
   }
 
-    return (
-    <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-      {filteredJoined.length === 0 ? (
-        <div
-          style={{
-            border: "1px solid rgba(0,0,0,.06)",
-            borderRadius: 12,
-            padding: 16,
-            opacity: 0.7,
-          }}
-        >
-          No shops match your search.
-        </div>
-          ) : (
-      filteredJoined.map((t) => {
-        const initials = (t.name || t.slug || "?")
-          .split(" ")
-          .map((part) => part[0])
-          .join("")
-          .slice(0, 2)
-          .toUpperCase();
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        background: "var(--tg-theme-secondary-bg-color,#f5f5f7)",
+      }}
+    >
+      <TopBar title="Shops you joined" />
 
-        return (
-          <button
-            key={t.id}
-            onClick={() => nav(`/s/${t.slug}`)}
+      <div
+        style={{
+          padding: "12px 16px 24px 16px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+        }}
+      >
+        {filteredJoined.length === 0 ? (
+          <div
             style={{
-              background: "#fff",
               border: "1px solid rgba(0,0,0,.06)",
-              borderRadius: 12,
-              padding: 12,
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              textAlign: "left",
-              cursor: "pointer",
+              borderRadius: 16,
+              padding: 16,
+              opacity: 0.7,
+              background: "#fff",
+              fontSize: 14,
             }}
           >
-            {/* avatar circle */}
-            <div
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: "50%",
-                border: "1px solid rgba(0,0,0,.06)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 14,
-                fontWeight: 600,
-                background: "rgba(0,0,0,.02)",
-              }}
+            No shops match your search.
+          </div>
+        ) : (
+          filteredJoined.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => nav(`/s/${t.slug}`)}
+              style={cardButton}
             >
-              {initials}
-            </div>
+              <ShopAvatar
+                name={t.name || t.slug || "Shop"}
+                url={t.logoWebUrl || null}
+              />
 
-            {/* text */}
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 600, fontSize: 14, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>
-                {t.name || "Unnamed shop"}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    fontWeight: 600,
+                    fontSize: 15,
+                    whiteSpace: "nowrap",
+                    textOverflow: "ellipsis",
+                    overflow: "hidden",
+                    color: "#111827",
+                  }}
+                >
+                  {t.name || "Unnamed shop"}
+                </div>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: "#6B7280",
+                    whiteSpace: "nowrap",
+                    textOverflow: "ellipsis",
+                    overflow: "hidden",
+                    marginTop: 2,
+                  }}
+                >
+                  {t.description?.trim() || `@${t.slug}`}
+                </div>
               </div>
-              <div style={{ fontSize: 12, opacity: 0.7 }}>
-                @{t.slug}
+
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-end",
+                  marginLeft: 8,
+                }}
+              >
+                <span style={memberPill}>Member</span>
               </div>
-            </div>
-          </button>
-        );
-      })
-    )}
+            </button>
+          ))
+        )}
+      </div>
     </div>
   );
-
 }
 
-function Avatar({ name, url }: { name: string; url: string | null }) {
-  const size = 36;
+const cardButton: React.CSSProperties = {
+  background: "var(--tg-theme-bg-color,#fff)",
+  border: "1px solid rgba(0,0,0,.06)",
+  borderRadius: 16,
+  padding: 12,
+  display: "flex",
+  alignItems: "center",
+  gap: 12,
+  textAlign: "left",
+  cursor: "pointer",
+  boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+};
+
+const memberPill: React.CSSProperties = {
+  fontSize: 11,
+  padding: "3px 8px",
+  borderRadius: 999,
+  background: "#F3F4F6",
+  color: "#4B5563",
+  fontWeight: 500,
+};
+
+function ShopAvatar({ name, url }: { name: string; url: string | null }) {
+  const size = 40;
+  const [errored, setErrored] = React.useState(false);
+
   const initials =
     name
       ?.split(/\s+/)
@@ -164,29 +233,36 @@ function Avatar({ name, url }: { name: string; url: string | null }) {
       .map((s) => s[0]?.toUpperCase())
       .join("") || "?";
 
-  return url ? (
-    <img
-      src={url}
-      alt=""
-      width={size}
-      height={size}
-      style={{ width: size, height: size, borderRadius: 8, objectFit: "cover" }}
-      onError={(e) => ((e.currentTarget.style.display = "none"), void 0)}
-    />
-  ) : (
+  return (
     <div
       style={{
         width: size,
         height: size,
-        borderRadius: 8,
-        background: "#eee",
+        borderRadius: "999px",
+        backgroundColor: "#eee",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        overflow: "hidden",
         fontWeight: 700,
+        flexShrink: 0,
       }}
     >
-      {initials}
+      {url && !errored ? (
+        <img
+          src={url}
+          alt=""
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            display: "block",
+          }}
+          onError={() => setErrored(true)}
+        />
+      ) : (
+        initials
+      )}
     </div>
   );
 }

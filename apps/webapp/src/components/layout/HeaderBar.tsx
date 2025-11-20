@@ -5,6 +5,9 @@ import { useTranslation } from "react-i18next";
 import { useWishlistCount } from "../../lib/wishlist";
 import { useCartCount, refreshCartCount } from "../../lib/store";
 import SearchBox from "../../components/search/SearchBox";
+import { getProfile } from "../../lib/api/profile";
+import type { Profile as UserProfile } from "../../lib/types";
+
 
 type Props = {
   onOpenMenu?: () => void;
@@ -112,6 +115,60 @@ function CartHeaderButton() {
   );
 }
 
+function ProfileHeaderButton({
+  user,
+  initials,
+  onClick,
+}: {
+  user: UserProfile | null;
+  initials: string;
+  onClick: () => void;
+}) {
+  const avatarUrl = user?.avatarWebUrl || null;
+
+  return (
+    <button
+      aria-label="Profile"
+      onClick={onClick}
+      title="Profile"
+      style={{
+        height: 36,
+        width: 36,
+        borderRadius: "999px",
+        border: "1px solid rgba(0,0,0,.08)",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "#eee",
+        cursor: "pointer",
+        overflow: "hidden",
+        fontSize: 12,
+        fontWeight: 600,
+      }}
+    >
+      {avatarUrl ? (
+        <img
+          src={avatarUrl}
+          alt={user?.name || user?.username || user?.tgId || "Profile"}
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            display: "block",
+          }}
+          onError={(e) => {
+            // hide broken image, initials will show next render if we clear avatarWebUrl later
+            (e.currentTarget as HTMLImageElement).style.display = "none";
+          }}
+        />
+      ) : (
+        initials
+      )}
+    </button>
+  );
+}
+
+
 export default function HeaderBar({
   title,
   onTitleClick,
@@ -122,7 +179,55 @@ export default function HeaderBar({
   const loc = useLocation();
   const nav = useNavigate();
 
+    // Smarter memory back: drawer origin OR last known context (shop / universal)
+  function backWithMemory(key: string, fallback: string) {
+    // 1) Explicit drawer memory (when opened from DrawerMenu)
+    const fromDrawer = localStorage.getItem(`tgshop:lastFrom:${key}`);
+    if (fromDrawer && fromDrawer !== fallback) {
+      nav(fromDrawer, { replace: true });
+      return;
+    }
+
+    // 2) Global context memory (where the user was browsing)
+    const lastBuyerShop = localStorage.getItem("tgshop:lastShopPage");           // /s/<slug>
+    const lastOwnerShop = localStorage.getItem("tgshop:lastOwnerShopPage");     // /shop/<slug>
+    const lastUniversal = localStorage.getItem("tgshop:lastUniversalPage");     // /universal…
+
+    const target =
+      lastBuyerShop ||
+      lastOwnerShop ||
+      lastUniversal ||
+      fallback;
+
+    nav(target, { replace: true });
+  }
+
+
+
+    // 👇 NEW: user profile state + loader
+  const [userProfile, setUserProfile] = React.useState<UserProfile | null>(null);
+
+  React.useEffect(() => {
+    (async () => {
+      try {
+        const p = await getProfile();
+        setUserProfile(p);
+      } catch (e) {
+        console.error("Failed to load profile in HeaderBar", e);
+      }
+    })();
+  }, []);
+
+  // 👇 NEW: initials helper
+  function getUserInitials(p?: UserProfile | null): string {
+    if (!p) return "?";
+    const base = p.name || p.username || p.tgId || "?";
+    const parts = base.split(/\s+/).filter(Boolean);
+    return (parts[0]?.[0] || "?").toUpperCase();
+  }
+
   const path = routedPath(loc);
+
 
   // Section detection on normalized path
   const isUniversalSection = path === "/" || path.startsWith("/universal");
@@ -152,6 +257,8 @@ export default function HeaderBar({
   const isOwnerInvitations = /^\/shop\/[^/]+\/invitations\/?$/.test(path);
 
   const isFavorites = path === "/favorites";
+
+
   // Shared query in URL (?q=...)
   const params = new URLSearchParams(loc.search || "");
   const searchQ = params.get("q") || "";
@@ -192,6 +299,33 @@ export default function HeaderBar({
     nav(-1);
     return;
   }
+
+  // Drawer-based global pages → go back where they were opened from
+    if (path === "/orders") {
+      backWithMemory("orders", "/universal");
+      return;
+    }
+
+    if (path === "/joined") {
+      backWithMemory("joined", "/universal");
+      return;
+    }
+
+    // /shops?mine=1 normalizes to /shops
+    if (path === "/shops") {
+      backWithMemory("shops", "/universal");
+      return;
+    }
+
+    if (path === "/profile") {
+      backWithMemory("profile", "/universal");
+      return;
+    }
+
+    if (path === "/settings") {
+      backWithMemory("settings", "/universal");
+      return;
+    }
 
   // /universal/p/:id → last universal (or /universal)
   if (/^\/universal\/p\/[^/]+/.test(path)) {
@@ -288,7 +422,7 @@ export default function HeaderBar({
    // OWNER side drawer pages: /shop/:slug/(settings|categories|invitations|top-products) → back to shop root
   {
     const m = path.match(
-      /^\/shop\/([^/]+)\/(settings|categories|invitations|top-products)(?:\/|$)/
+      /^\/shop\/([^/]+)\/(settings|categories|invitations|top-products|analytics)(?:\/|$)/
     );
     if (m) {
       const slug = m[1];
@@ -509,9 +643,15 @@ export default function HeaderBar({
         </div>
 
 
-        {/* Right side: favorites in universal, cart in buyer */}
-        {rightOverride ? (
+        {/* Right side: favorites in universal, cart in buyer, profile in /shops */}
+        {rightOverride && !isShopsList ? (
           rightOverride
+        ) : isShopsList ? (
+          <ProfileHeaderButton
+            user={userProfile}
+            initials={getUserInitials(userProfile)}
+            onClick={() => nav("/profile")}
+          />
         ) : isUniversalSection ? (
           <FavoriteHeaderButton />
         ) : inBuyerShop ? (
@@ -519,6 +659,8 @@ export default function HeaderBar({
         ) : (
           <span style={{ ...iconBtn, visibility: "hidden" }} />
         )}
+
+
       </div>
     </header>
   );

@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { db } from "../lib/db";
 import { telegramAuth } from "../api/telegramAuth";
+import { publicImageUrl } from "../lib/r2";
+import { extFromMime } from "./utils/ext";
 
 const shopsRouter = Router();
 
@@ -8,25 +10,65 @@ const shopsRouter = Router();
 shopsRouter.use(telegramAuth);
 
 // GET /api/shops/list  → returns { universal, myShops, joinedShops }
+// GET /api/shops/list  → returns { universal, myShops, joinedShops }
 shopsRouter.get("/shops/list", async (req: any, res, next) => {
   console.log("on routs.ts page 12 [/shops/list] userId=");
   try {
     const userId = req.userId!;
+
     const owned = await db.membership.findMany({
-      where: { userId, role: 'OWNER' },
+      where: { userId, role: "OWNER" },
       include: { tenant: true },
     });
+
     const joined = await db.membership.findMany({
-      where: { userId, role: { in: ['MEMBER','HELPER','COLLABORATOR'] } },
+      where: { userId, role: { in: ["MEMBER", "HELPER", "COLLABORATOR"] } },
       include: { tenant: true },
     });
-    res.json({
-      universal: { title: 'Universal Shop', key: 'universal' },
-      myShops: owned.map(m => m.tenant),
-      joinedShops: joined.map(m => m.tenant),
+
+    // plain tenant objects
+    const myTenants = owned.map((m: any) => m.tenant);
+    const joinedTenants = joined.map((m: any) => m.tenant);
+
+    // build logoWebUrl for all tenants
+    const logoIds = Array.from(
+      new Set(
+        [...myTenants, ...joinedTenants]
+          .map((t: any) => t?.logoImageId)
+          .filter((id: string | null | undefined): id is string => Boolean(id))
+      )
+    );
+
+    let logoMap: Record<string, string> = {};
+    if (logoIds.length) {
+      const images = await db.image.findMany({
+        where: { id: { in: logoIds } },
+        select: { id: true, mime: true },
+      });
+
+      logoMap = Object.fromEntries(
+        images.map((im) => {
+          const ext = extFromMime(im.mime);
+          return [im.id, publicImageUrl(im.id, ext)];
+        })
+      );
+    }
+
+    const withLogo = (t: any) => ({
+      ...t,
+      logoWebUrl: t.logoImageId ? logoMap[t.logoImageId] ?? null : null,
     });
-  } catch (e) { next(e); }
+
+    res.json({
+      universal: { title: "Universal Shop", key: "universal" },
+      myShops: myTenants.map(withLogo),
+      joinedShops: joinedTenants.map(withLogo),
+    });
+  } catch (e) {
+    next(e);
+  }
 });
+
 
 // POST /api/tenants  { name }  → creates tenant and OWNER membership
 shopsRouter.post("/tenants", async (req: any, res, next) => {

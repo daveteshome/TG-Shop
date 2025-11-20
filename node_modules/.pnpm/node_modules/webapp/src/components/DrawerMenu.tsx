@@ -4,12 +4,30 @@ import { Link } from "react-router-dom";
 import { lockScroll, unlockScroll } from "../lib/dom/scrollLock"; // adjust path if needed
 import LanguageMenu from "./LanguageMenu";
 import { useTranslation } from "react-i18next";
+import { useNavigate, useLocation } from "react-router-dom";
 
 
 type Props = { open: boolean; onClose: () => void };
 
 export default function DrawerMenu({ open, onClose }: Props) {
   const { t } = useTranslation();
+  const nav = useNavigate();
+  const loc = useLocation();
+
+    function getCurrentPath() {
+    const hash = loc.hash || "";
+    const hashPath = hash.startsWith("#/") ? hash.slice(1) : null;
+    const base = hashPath ?? loc.pathname;
+    return base.replace(/^\/tma(?=\/|$)/, "") || "/";
+  }
+
+  function goWithMemory(memoryKey: string, path: string) {
+    const from = getCurrentPath();
+    localStorage.setItem(`tgshop:lastFrom:${memoryKey}`, from);
+    nav(path);
+  }
+
+
   // 1️⃣ existing effect for ESC
   React.useEffect(() => {
     const onEsc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -52,18 +70,72 @@ export default function DrawerMenu({ open, onClose }: Props) {
         <div style={{ padding: 16, borderBottom: "1px solid #eee", fontWeight: 700, fontSize: 18 }}>Menu</div>
 
         <nav style={{ padding: 8, display: "grid", gap: 4 }}>
-           <li style={{ marginTop: 8 }}>
+          <li style={{ marginTop: 8 }}>
             <LanguageMenu />
           </li>
+
+          {/* Normal links (no memory) */}
           <Item to="/">🏠 {t("nav_home")}</Item>
           <Item to="/universal">🌍 {t("nav_universal")}</Item>
-          <Item to="/joined">🤝 {t("nav_joined")}</Item>
-          <Item to="/shops?mine=1">🏪 {t("nav_myshops")}</Item>
-          <Item to="/orders">📦 {t("nav_orders")}</Item>
+
+          {/* With memory */}
+          <button
+            type="button"
+            onClick={() => {
+              goWithMemory("joined", "/joined");
+              onClose();
+            }}
+            style={itemStyle}
+          >
+            🤝 {t("nav_joined")}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              goWithMemory("shops", "/shops?mine=1");
+              onClose();
+            }}
+            style={itemStyle}
+          >
+            🏪 {t("nav_myshops")}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              goWithMemory("orders", "/orders");
+              onClose();
+            }}
+            style={itemStyle}
+          >
+            📦 {t("nav_orders")}
+          </button>
+
+          {/* Cart stays global (no memory for now) */}
           <Item to="/cart">🛒 {t("nav_cart")}</Item>
-          <Item to="/profile">👤 {t("nav_profile")}</Item>
-          <Item to="/settings">⚙️ {t("nav_settings")}</Item>
-         
+
+          <button
+            type="button"
+            onClick={() => {
+              goWithMemory("profile", "/profile");
+              onClose();
+            }}
+            style={itemStyle}
+          >
+            👤 {t("nav_profile")}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              goWithMemory("settings", "/settings");
+              onClose();
+            }}
+            style={itemStyle}
+          >
+            ⚙️ {t("nav_settings")}
+          </button>
         </nav>
 
         <div style={{ marginTop: "auto", padding: 12 }}>
@@ -80,7 +152,10 @@ export default function DrawerMenu({ open, onClose }: Props) {
 }
 
 const itemStyle: React.CSSProperties = {
-  display: "block",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "flex-start",   // 👈 this is key
+  gap: 10,
   padding: "12px 12px",
   borderRadius: 10,
   textDecoration: "none",

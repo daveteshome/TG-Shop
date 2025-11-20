@@ -17,8 +17,10 @@ type UserInfo = {
   username: string | null;
   name: string | null;
   phone: string | null;
-  avatarUrl?: string | null;
+  avatarUrl?: string | null;     // imageId in DB
+  avatarWebUrl?: string | null;  // resolved URL from backend
 };
+
 
 type ShopRole = "OWNER" | "HELPER" | "COLLABORATOR" | "MEMBER";
 
@@ -220,21 +222,40 @@ export default function ShopInvitations() {
                   >
                     {/* avatar circle */}
                     <div
-                      style={{
-                        width: 36,
-                        height: 36,
-                        borderRadius: "50%",
-                        background: "rgba(0,0,0,.04)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        fontSize: 14,
-                        fontWeight: 600,
-                        flexShrink: 0,
-                      }}
-                    >
-                      {initials}
-                    </div>
+  style={{
+    width: 36,
+    height: 36,
+    borderRadius: "50%",
+    background: "rgba(0,0,0,.04)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 14,
+    fontWeight: 600,
+    flexShrink: 0,
+    overflow: "hidden",
+  }}
+>
+  {u.avatarWebUrl ? (
+    <img
+      src={u.avatarWebUrl}
+      alt={displayName}
+      style={{
+        width: "100%",
+        height: "100%",
+        objectFit: "cover",
+        display: "block",
+      }}
+      onError={(e) => {
+        // if image fails, fallback to initials
+        e.currentTarget.style.display = "none";
+      }}
+    />
+  ) : (
+    initials
+  )}
+</div>
+
 
                     <div style={{ flex: 1 }}>
                       <div

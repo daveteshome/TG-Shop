@@ -18,7 +18,8 @@ type TenantLite = {
   slug: string;
   name: string;
   publicPhone?: string | null;
-  publicTelegramLink?: string | null; 
+  publicTelegramLink?: string | null;
+  logoWebUrl?: string | null; 
 };
 
 type CatalogResp = {
@@ -108,6 +109,7 @@ export default function ShopBuyer() {
               name: t.name,
               publicPhone: t.publicPhone ?? null,
               publicTelegramLink: t.publicTelegramLink ?? null,
+              logoWebUrl: t.logoWebUrl ?? null,   // 👈 ADD THIS
             };
           }
         } catch {}
@@ -239,6 +241,8 @@ export default function ShopBuyer() {
   const shopPhone = catalog.tenant.publicPhone ?? undefined;
   const shopTelegram = catalog.tenant.publicTelegramLink ?? null;
   const tenantId = catalog.tenant.id || null;
+  const shopLogo = catalog.tenant.logoWebUrl ?? null;
+
 
 const tg = getTelegramWebApp();
 
@@ -246,20 +250,12 @@ const tg = getTelegramWebApp();
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {/* Header */}
+      {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div
-          style={{
-            width: 40,
-            height: 40,
-            borderRadius: 12,
-            background: "#eee",
-            backgroundSize: "cover",
-            backgroundPosition: "center",
-          }}
-          aria-hidden
-        />
+        <ShopAvatar name={shopName} url={shopLogo} />
         <div style={{ fontWeight: 700, fontSize: 16 }}>{shopName}</div>
       </div>
+
 
       {/* Unified category grid with recursive behavior */}
 
@@ -356,3 +352,45 @@ const grid: React.CSSProperties = {
   gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))",
   gap: 10,
 };
+
+
+function ShopAvatar({ name, url }: { name: string; url: string | null }) {
+  const size = 40;
+  const initial = (name || "S").slice(0, 1).toUpperCase();
+
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        borderRadius: "999px",
+        backgroundColor: "#eee",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        overflow: "hidden",
+        fontWeight: 700,
+        flexShrink: 0,
+      }}
+    >
+      {url ? (
+        <img
+          src={url}
+          alt=""
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            display: "block",
+          }}
+          onError={(e) => {
+            // if image fails, hide it so the initial is visible
+            e.currentTarget.style.display = "none";
+          }}
+        />
+      ) : (
+        initial
+      )}
+    </div>
+  );
+}

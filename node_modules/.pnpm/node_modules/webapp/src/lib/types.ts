@@ -73,6 +73,7 @@ export type Profile = {
   place: string | null;
   specialReference: string | null;
 
-  avatarUrl: string | null;
+  avatarUrl: string | null;        // imageId in DB
+  avatarWebUrl?: string | null;    // resolved URL from backend
 };
 

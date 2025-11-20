@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { TopBar } from "../components/layout/TopBar";
 import { Loader } from "../components/common/Loader";
 import { ErrorView } from "../components/common/ErrorView";
@@ -6,22 +6,25 @@ import { FormField, inputStyle } from "../components/common/FormField";
 import { AddressForm } from "../components/profile/AddressForm";
 import { useAsync } from "../lib/hooks/useAsync";
 import { getProfile, updateProfile } from "../lib/api/profile";
+import { getInitDataRaw } from "../lib/telegram";
 import type { Profile as TProfile } from "../lib/types";
 
-// 20 random avatars from DiceBear (no local files needed)
-const DEFAULT_AVATARS = Array.from({ length: 20 }).map((_, i) => {
-  return `https://api.dicebear.com/7.x/thumbs/svg?seed=Avatar${i + 1}`;
-});
+// Derive initials for fallback avatar
+function getInitials(
+  name?: string | null,
+  username?: string | null,
+  tgId?: string | null
+): string {
+  const base = name || username || tgId || "?";
+  const parts = base.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  return parts[0][0]?.toUpperCase() || "?";
+}
 
-// Deterministic default avatar per user (based on tgId)
-function getDefaultAvatar(tgId?: string | null): string {
-  if (!tgId) return DEFAULT_AVATARS[0];
-  let hash = 0;
-  for (let i = 0; i < tgId.length; i++) {
-    hash = (hash * 31 + tgId.charCodeAt(i)) | 0;
-  }
-  const idx = Math.abs(hash) % DEFAULT_AVATARS.length;
-  return DEFAULT_AVATARS[idx];
+// Heuristic: is the string a URL or just an imageId?
+function looksLikeUrl(s?: string | null): boolean {
+  if (!s) return false;
+  return /^https?:\/\//i.test(s);
 }
 
 export default function Profile() {
@@ -29,9 +32,70 @@ export default function Profile() {
   const [form, setForm] = useState<TProfile | null>(null);
   const [saving, setSaving] = useState(false);
 
+  // UI-only preview URL (R2 web URL)
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+
+  // For choosing local file BEFORE upload (optional – we upload immediately on change)
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   useEffect(() => {
-    if (q.data) setForm(q.data);
-  }, [q.data]);
+  if (q.data) {
+    setForm(q.data);
+
+    if (q.data.avatarWebUrl) {
+      // preferred path: URL from backend
+      setAvatarPreview(q.data.avatarWebUrl);
+    } else if (looksLikeUrl(q.data.avatarUrl)) {
+      // backward compat: if avatarUrl is still a full URL
+      setAvatarPreview(q.data.avatarUrl as string);
+    } else {
+      setAvatarPreview(null);
+    }
+  }
+}, [q.data]);
+
+
+  async function handleUploadAvatar(file: File) {
+    const initData = getInitDataRaw();
+    if (!initData) {
+      alert("No Telegram auth data. Please reopen the Mini App.");
+      return;
+    }
+
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+
+      const res = await fetch("/api/uploads/image", {
+        method: "POST",
+        body: fd,
+        headers: { Authorization: `tma ${initData}` },
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        console.error("Avatar upload failed", res.status, text);
+        alert("Avatar upload failed");
+        return;
+      }
+
+      const { imageId, webUrl } = await res.json();
+
+      // Store imageId in form.avatarUrl (DB field), preview URL in local state
+      setForm((prev) =>
+        prev
+          ? {
+              ...prev,
+              avatarUrl: imageId || null,
+            }
+          : prev
+      );
+      setAvatarPreview(webUrl || null);
+    } catch (e) {
+      console.error(e);
+      alert("Avatar upload failed");
+    }
+  }
 
   async function save() {
     if (!form) return;
@@ -45,6 +109,7 @@ export default function Profile() {
         city: form.city || null,
         place: form.place || null,
         specialReference: form.specialReference || null,
+        // avatarUrl now stores the R2 image ID (or null)
         avatarUrl: form.avatarUrl || null,
       });
       alert("Profile saved");
@@ -61,62 +126,89 @@ export default function Profile() {
 
       {form && (
         <div style={panel}>
-          {/* Current avatar (chosen or deterministic default) */}
-          <div style={{ textAlign: "center", marginBottom: 12 }}>
-            <img
-              src={form.avatarUrl || getDefaultAvatar(form.tgId)}
-              alt="Profile"
+          {/* Avatar + Upload/Remove */}
+          <div style={{ textAlign: "center", marginBottom: 16 }}>
+            <div
               style={{
                 width: 80,
                 height: 80,
                 borderRadius: "50%",
-                objectFit: "cover",
+                background:
+                  "var(--tg-theme-bg-color, radial-gradient(circle at 30% 30%, #4f46e5, #0ea5e9))",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                overflow: "hidden",
+                fontWeight: 700,
+                fontSize: 26,
+                margin: "0 auto 8px auto",
+                color: "#fff",
+              }}
+            >
+              {avatarPreview ? (
+                <img
+                  src={avatarPreview}
+                  alt="Profile"
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                    display: "block",
+                  }}
+                  onError={() => {
+                    // fallback to initials if preview URL breaks
+                    setAvatarPreview(null);
+                  }}
+                />
+              ) : (
+                getInitials(form.name, form.username, (form as any).tgId)
+              )}
+            </div>
+
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                // Upload immediately, like ShopSettings
+                void handleUploadAvatar(f);
               }}
             />
-          </div>
 
-          {/* Avatar chooser (only predefined random avatars, no upload) */}
-          <div style={{ marginBottom: 12 }}>
-            <div style={{ marginBottom: 6, fontWeight: 600, fontSize: 13 }}>
-              Choose an avatar
-            </div>
-            <div style={avatarGrid}>
-              {DEFAULT_AVATARS.map((url) => {
-                const isSelected = form.avatarUrl === url;
-                return (
-                  <button
-                    key={url}
-                    type="button"
-                    onClick={() => setForm({ ...form, avatarUrl: url })}
-                    style={{
-                      border: isSelected
-                        ? "2px solid var(--tg-theme-button-color, #2ea6ff)"
-                        : "1px solid rgba(0,0,0,.1)",
-                      padding: 2,
-                      borderRadius: "50%",
-                      background: "transparent",
-                    }}
-                  >
-                    <img
-                      src={url}
-                      alt="avatar option"
-                      style={{
-                        width: 40,
-                        height: 40,
-                        borderRadius: "50%",
-                        objectFit: "cover",
-                      }}
-                    />
-                  </button>
-                );
-              })}
-            </div>
+            {/* Upload / Remove button */}
+            {avatarPreview ? (
+              <button
+                type="button"
+                style={secondaryBtn}
+                onClick={() => {
+                  // Remove avatar → back to initials
+                  setAvatarPreview(null);
+                  setForm({ ...form, avatarUrl: null });
+                }}
+              >
+                Remove photo
+              </button>
+            ) : (
+              <button
+                type="button"
+                style={secondaryBtn}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                Upload photo
+              </button>
+            )}
           </div>
 
           {/* Identity summary */}
           <div style={kv}>
             <span style={k}>User</span>
-            <span style={v}>{form.username || form.name || form.tgId}</span>
+            <span style={v}>
+              {form.username || form.name || (form as any).tgId}
+            </span>
           </div>
 
           {/* Name */}
@@ -214,8 +306,13 @@ const primaryBtn: React.CSSProperties = {
   marginTop: 8,
 };
 
-const avatarGrid: React.CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: 8,
+const secondaryBtn: React.CSSProperties = {
+  border: "1px solid rgba(0,0,0,.12)",
+  background: "#fff",
+  color: "#111827",
+  padding: "6px 14px",
+  borderRadius: 999,
+  fontSize: 13,
+  cursor: "pointer",
 };
+

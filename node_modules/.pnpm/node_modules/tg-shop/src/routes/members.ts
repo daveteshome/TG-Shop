@@ -3,6 +3,9 @@ import { db } from "../lib/db";
 import { telegramAuth } from "../api/telegramAuth";
 import { bot } from '../bot/bot';
 import { requireAuth } from "./_helpers";
+import { publicImageUrl } from "../lib/r2";
+import { extFromMime } from "./utils/ext";
+
 
 const membersRouter = Router();
 membersRouter.use(telegramAuth);
@@ -137,10 +140,52 @@ membersRouter.post("/invites/accept", async (req: any, res, next) => {
 membersRouter.get('/tenants/:tenantId/members', async (req, res, next) => {
   try {
     const { tenantId } = req.params;
-    const members = await db.membership.findMany({ where: { tenantId }, include: { user: true } });
+
+    const rawMembers = await db.membership.findMany({
+      where: { tenantId },
+      include: { user: true },
+    });
+
+    // Collect all avatar image IDs
+    const avatarIds = Array.from(
+      new Set(
+        rawMembers
+          .map((m) => m.user?.avatarUrl)
+          .filter((id: string | null | undefined): id is string => Boolean(id))
+      )
+    );
+
+    let avatarMap: Record<string, string> = {};
+    if (avatarIds.length) {
+      const images = await db.image.findMany({
+        where: { id: { in: avatarIds } },
+        select: { id: true, mime: true },
+      });
+
+      avatarMap = Object.fromEntries(
+        images.map((im) => {
+          const ext = extFromMime(im.mime);
+          return [im.id, publicImageUrl(im.id, ext)];
+        })
+      );
+    }
+
+    const members = rawMembers.map((m) => ({
+      ...m,
+      user: {
+        ...m.user,
+        avatarWebUrl: m.user?.avatarUrl
+          ? avatarMap[m.user.avatarUrl] ?? null
+          : null,
+      },
+    }));
+
     res.json({ members });
-  } catch (e) { next(e); }
+  } catch (e) {
+    next(e);
+  }
 });
+
 
 
 membersRouter.patch(
@@ -170,26 +215,36 @@ membersRouter.patch(
       }
 
       // Update membership AND include user so response matches GET /members
-      const updated = await db.membership.update({
+            const updated = await db.membership.update({
         where: { tenantId_userId: { tenantId, userId } },
         data: { role },
-        include: { user: true },   // important so UI still has user info
+        include: { user: true },
       });
 
-      // Audit log
-      await db.membershipAudit.create({
-        data: {
-          tenantId,
-          actorId,
-          targetId: userId,
-          action: "ROLE_UPDATE",
-          fromRole: prev.role,
-          toRole: role,
+      // Build avatarWebUrl for this one user (if any)
+      let avatarWebUrl: string | null = null;
+      if (updated.user?.avatarUrl) {
+        const im = await db.image.findUnique({
+          where: { id: updated.user.avatarUrl },
+          select: { mime: true },
+        });
+        if (im) {
+          const ext = extFromMime(im.mime);
+          avatarWebUrl = publicImageUrl(updated.user.avatarUrl, ext);
+        }
+      }
+
+      const member = {
+        ...updated,
+        user: {
+          ...updated.user,
+          avatarWebUrl,
         },
-      });
+      };
 
       // ✅ Return shape matching frontend expectation
-      return res.json({ member: updated });
+      return res.json({ member });
+
 
     } catch (err) {
       next(err);

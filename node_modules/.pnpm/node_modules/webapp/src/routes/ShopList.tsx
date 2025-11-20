@@ -1,15 +1,23 @@
-// apps/webapp/src/routes/ShopList.tsx
 import React, { useEffect, useState, useRef, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { api } from "../lib/api/index";
 import { getInitDataRaw } from "../lib/telegram";
 import { createTenantFull } from "../lib/api/index";
 import { useTranslation } from "react-i18next";
+import { TopBar } from "../components/layout/TopBar";
 
-type Tenant = { id: string; slug: string; name: string; publicPhone?: string | null };
+type Tenant = {
+  id: string;
+  slug: string;
+  name: string;
+  publicPhone?: string | null;
+  logoImageId?: string | null;
+  logoWebUrl?: string | null;
+  description?: string | null;
+};
 
 export default function ShopList() {
-  const { t } = useTranslation(); 
+  const { t } = useTranslation();
 
   const [loading, setLoading] = useState(true);
   const [owned, setOwned] = useState<Tenant[]>([]);
@@ -18,18 +26,16 @@ export default function ShopList() {
   const [creating, setCreating] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
 
-  // form state (match Shop Settings fields)
   const [newName, setNewName] = useState("");
   const [newPhone, setNewPhone] = useState<string>("");
   const [newDesc, setNewDesc] = useState<string>("");
-  const [newPublish, setNewPublish] = useState<boolean>(true); // default TRUE
+  const [newPublish, setNewPublish] = useState<boolean>(true);
   const [logoFile, setLogoFile] = useState<File | null>(null);
 
   const logoInputRef = useRef<HTMLInputElement | null>(null);
   const navigate = useNavigate();
   const loc = useLocation();
 
-  // Preview (small icon like in Settings)
   const logoPreviewUrl = useMemo(() => {
     if (!logoFile) return null;
     return URL.createObjectURL(logoFile);
@@ -46,7 +52,11 @@ export default function ShopList() {
       setLoading(true);
       setErr(null);
       try {
-        const r = await api<{ universal: any; myShops: Tenant[]; joinedShops: Tenant[] }>("/shops/list");
+        const r = await api<{
+          universal: any;
+          myShops: Tenant[];
+          joinedShops: Tenant[];
+        }>("/shops/list");
         setOwned(r.myShops || []);
         if (!r.myShops || r.myShops.length === 0) {
           setShowCreate(true);
@@ -59,7 +69,6 @@ export default function ShopList() {
     })();
   }, []);
 
-  // generic pre-create upload (no slug yet)
   async function uploadLogoPreCreate(file: File): Promise<string | null> {
     const initData = getInitDataRaw();
     if (!initData) throw new Error("no_tma_auth");
@@ -82,55 +91,39 @@ export default function ShopList() {
   }
 
   async function handleCreateShop() {
-  setErr(null);
-  if (!newName.trim()) {
-    setErr("Please enter a shop name.");
-    return;
-  }
-  setCreating(true);
-  try {
-    console.log("[create-shop] submit", { newName, newPhone, hasDesc: Boolean(newDesc), newPublish, hasLogo: Boolean(logoFile) });
-
-    // 1) Optional logo upload
-    let logoImageId: string | null = null;
-    if (logoFile) {
-      console.log("[create-shop] uploading logo…");
-      logoImageId = await uploadLogoPreCreate(logoFile);
-      console.log("[create-shop] upload done", { logoImageId });
-    } else {
-      console.log("[create-shop] no logo selected");
+    setErr(null);
+    if (!newName.trim()) {
+      setErr("Please enter a shop name.");
+      return;
     }
+    setCreating(true);
+    try {
+      let logoImageId: string | null = null;
+      if (logoFile) {
+        logoImageId = await uploadLogoPreCreate(logoFile);
+      }
 
-    // 2) Create tenant with full data
-    const payload = {
-      name: newName.trim(),
-      publicPhone: newPhone.trim() || null,
-      description: newDesc.trim() || null,
-      publishUniversal: newPublish,
-      logoImageId: logoImageId || null,
-    };
-    console.log("[create-shop] POST /tenants payload", payload);
+      const payload = {
+        name: newName.trim(),
+        publicPhone: newPhone.trim() || null,
+        description: newDesc.trim() || null,
+        publishUniversal: newPublish,
+        logoImageId: logoImageId || null,
+      };
 
-    const { tenant } = await createTenantFull(payload);
-    console.log("[create-shop] response", tenant);
+      const { tenant } = await createTenantFull(payload);
 
-    if (tenant?.slug) {
-      console.log("[create-shop] navigate", tenant.slug);
-      navigate(`/shop/${tenant.slug}`);
-    } else {
-      setErr("Created but no slug returned.");
+      if (tenant?.slug) {
+        navigate(`/shop/${tenant.slug}`);
+      } else {
+        setErr("Created but no slug returned.");
+      }
+    } catch (e: any) {
+      setErr(e?.message || "Failed to create shop");
+    } finally {
+      setCreating(false);
     }
-  } catch (e: any) {
-    console.error("[create-shop][ERROR]", e);
-    setErr(e?.message || "Failed to create shop");
-  } finally {
-    setCreating(false);
   }
-}
-
-
-  if (loading) return <div style={{ padding: 12 }}>Loading…</div>;
-  if (err && !showCreate) return <div style={{ padding: 12, color: "crimson" }}>Error: {err}</div>;
 
   const hasShops = owned.length > 0;
 
@@ -145,178 +138,269 @@ export default function ShopList() {
         return name.includes(q) || slug.includes(q);
       });
 
+  if (loading) {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          background: "var(--tg-theme-secondary-bg-color,#f5f5f7)",
+        }}
+      >
+        <TopBar title={t("title_my_shops")} />
+        <div style={{ padding: "12px 16px" }}>Loading…</div>
+      </div>
+    );
+  }
+
+  if (err && !showCreate && !hasShops) {
+    return (
+      <div
+        style={{
+          minHeight: "100vh",
+          background: "var(--tg-theme-secondary-bg-color,#f5f5f7)",
+        }}
+      >
+        <TopBar title={t("title_my_shops")} />
+        <div style={{ padding: "12px 16px", color: "crimson" }}>
+          Error: {err}
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div style={{ padding: 12, display: "grid", gap: 14 }}>
-      {/* Header: 🏪 My Shops + (+) */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <h2 style={{ margin: 0 }}>🏪 {t("title_my_shops")}</h2>
-        {hasShops && (
+    <div
+      style={{
+        minHeight: "100vh",
+        background: "var(--tg-theme-secondary-bg-color,#f5f5f7)",
+      }}
+    >
+      <TopBar
+        title={t("title_my_shops")}
+        right={
           <button
             onClick={() => {
               setShowCreate((v) => !v);
-              setNewName("");
-              setNewPhone("");
-              setNewDesc("");
-              setNewPublish(true);
-              setLogoFile(null);
+              if (!showCreate) {
+                setNewName("");
+                setNewPhone("");
+                setNewDesc("");
+                setNewPublish(true);
+                setLogoFile(null);
+              }
             }}
-            style={circleBtn}
-            title="Create new shop"
+            style={topRightBtn}
           >
-            +
+            + New
           </button>
-        )}
-      </div>
+        }
+      />
 
-      {/* list of shops */}
-            {/* list of shops */}
-      {hasShops ? (
-        filteredOwned.length === 0 ? (
-          <div style={muted}>No shops match your search.</div>
-        ) : (
-          <ul style={list}>
-            {filteredOwned.map((s) => (
-              <li key={s.id}>
+      <div
+        style={{
+          padding: "12px 16px 24px 16px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+        }}
+      >
+        {hasShops ? (
+          filteredOwned.length === 0 ? (
+            <div style={mutedCard}>No shops match your search.</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {filteredOwned.map((s) => (
                 <button
+                  key={s.id}
                   onClick={() => navigate(`/shop/${s.slug}`)}
-                  style={linkBtnButton}
+                  style={cardButton}
                 >
-                  {s.name}
+                  <ShopAvatar
+                    name={s.name || s.slug || "Shop"}
+                    url={s.logoWebUrl || null}
+                  />
+
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontWeight: 600,
+                        fontSize: 15,
+                        whiteSpace: "nowrap",
+                        textOverflow: "ellipsis",
+                        overflow: "hidden",
+                        color: "#111827",
+                      }}
+                    >
+                      {s.name || "Unnamed shop"}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: "#6B7280",
+                        whiteSpace: "nowrap",
+                        textOverflow: "ellipsis",
+                        overflow: "hidden",
+                        marginTop: 2,
+                      }}
+                    >
+                      {s.description?.trim() || `@${s.slug}`}
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "flex-end",
+                      marginLeft: 8,
+                    }}
+                  >
+                    <span style={ownerPill}>Owner</span>
+                  </div>
                 </button>
-              </li>
-            ))}
-          </ul>
-        )
-      ) : (
-        <div style={muted}>You don’t own any shops yet.</div>
-      )}
+              ))}
+            </div>
+          )
+        ) : (
+          <div style={mutedCard}>You don’t own any shops yet.</div>
+        )}
 
+        {showCreate && (
+          <div
+            style={{
+              marginTop: 4,
+              border: "1px dashed rgba(0,0,0,.12)",
+              borderRadius: 16,
+              padding: 14,
+              display: "grid",
+              gap: 10,
+              background: "var(--tg-theme-bg-color,#fff)",
+            }}
+          >
+            {err ? <div style={{ color: "crimson" }}>{err}</div> : null}
 
-      {/* create form (match Shop Settings styling patterns) */}
-      {showCreate && (
-        <div
-          style={{
-            marginTop: 10,
-            border: "1px dashed rgba(0,0,0,.15)",
-            borderRadius: 10,
-            padding: 12,
-            display: "grid",
-            gap: 10,
-          }}
-        >
-          {err ? <div style={{ color: "crimson" }}>{err}</div> : null}
-
-          {/* Name */}
-          <label style={label}>Shop name</label>
-          <input
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            placeholder="e.g., Dawit's Store"
-            style={input}
-          />
-
-          {/* Phone */}
-          <label style={label}>Public phone</label>
-          <input
-            type="tel"
-            value={newPhone}
-            onChange={(e) => setNewPhone(e.target.value)}
-            placeholder="+49 123 4567"
-            style={input}
-          />
-
-          {/* Description */}
-          <label style={label}>Description</label>
-          <textarea
-            value={newDesc}
-            onChange={(e) => setNewDesc(e.target.value)}
-            placeholder="Short description of your shop"
-            style={{ ...input, minHeight: 70, resize: "vertical" as const }}
-          />
-
-          {/* Publish toggle */}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+            <label style={label}>Shop name</label>
             <input
-              id="publishUniversal"
-              type="checkbox"
-              checked={newPublish}
-              onChange={(e) => setNewPublish(e.target.checked)}
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="e.g., Dawit's Store"
+              style={input}
             />
-            <label htmlFor="publishUniversal" style={{ fontSize: 13 }}>
-              Publish to Universal (recommended)
-            </label>
-          </div>
 
-          {/* Logo */}
-          <label style={label}>Logo</label>
-          <input
-            ref={logoInputRef}
-            type="file"
-            accept="image/*"
-            style={{ display: "none" }}
-            onChange={(e) => setLogoFile(e.target.files?.[0] || null)}
-          />
+            <label style={label}>Public phone</label>
+            <input
+              type="tel"
+              value={newPhone}
+              onChange={(e) => setNewPhone(e.target.value)}
+              placeholder="+49 123 4567"
+              style={input}
+            />
 
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {/* Preview chip (same idea as Settings: small rounded image) */}
+            <label style={label}>Description</label>
+            <textarea
+              value={newDesc}
+              onChange={(e) => setNewDesc(e.target.value)}
+              placeholder="Short description of your shop"
+              style={{ ...input, minHeight: 70, resize: "vertical" as const }}
+            />
+
             <div
               style={{
-                width: 56,
-                height: 56,
-                borderRadius: 12,
-                border: "1px solid rgba(0,0,0,.12)",
-                overflow: "hidden",
-                background: "#fafafa",
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "center",
+                gap: 8,
+                marginTop: 6,
               }}
             >
-              {logoPreviewUrl ? (
-                <img
-                  src={logoPreviewUrl}
-                  alt="logo preview"
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                />
-              ) : (
-                <span style={{ fontSize: 11, opacity: 0.55 }}>No logo</span>
+              <input
+                id="publishUniversal"
+                type="checkbox"
+                checked={newPublish}
+                onChange={(e) => setNewPublish(e.target.checked)}
+              />
+              <label htmlFor="publishUniversal" style={{ fontSize: 13 }}>
+                Publish to Universal (recommended)
+              </label>
+            </div>
+
+            <label style={label}>Logo</label>
+            <input
+              ref={logoInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: "none" }}
+              onChange={(e) => setLogoFile(e.target.files?.[0] || null)}
+            />
+
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div
+                style={{
+                  width: 56,
+                  height: 56,
+                  borderRadius: 16,
+                  border: "1px solid rgba(0,0,0,.12)",
+                  overflow: "hidden",
+                  background: "#fafafa",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                {logoPreviewUrl ? (
+                  <img
+                    src={logoPreviewUrl}
+                    alt="logo preview"
+                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                  />
+                ) : (
+                  <span style={{ fontSize: 11, opacity: 0.55 }}>No logo</span>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => logoInputRef.current?.click()}
+                style={btn}
+              >
+                {logoFile ? "Change logo" : "Choose logo"}
+              </button>
+
+              {logoFile && (
+                <span
+                  style={{
+                    fontSize: 12,
+                    opacity: 0.8,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {logoFile.name}
+                </span>
               )}
             </div>
 
-            <button
-              type="button"
-              onClick={() => logoInputRef.current?.click()}
-              style={btn}
-            >
-              {logoFile ? "Change logo" : "Choose logo"}
-            </button>
-
-            {logoFile && (
-              <span style={{ fontSize: 12, opacity: 0.8, overflow: "hidden", textOverflow: "ellipsis" }}>
-                {logoFile.name}
-              </span>
-            )}
+            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+              <button
+                onClick={handleCreateShop}
+                disabled={creating}
+                style={btn}
+              >
+                {creating ? "Creating…" : "Create shop"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCreate(false);
+                  setErr(null);
+                }}
+                style={btn}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
-
-          {/* Submit */}
-          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-            <button onClick={handleCreateShop} disabled={creating} style={btn}>
-              {creating ? "Creating…" : "Create shop"}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setShowCreate(false);
-                setErr(null);
-              }}
-              style={btn}
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
@@ -329,27 +413,8 @@ const btn: React.CSSProperties = {
   display: "inline-block",
   background: "#fff",
   cursor: "pointer",
+  fontSize: 13,
 };
-
-const list: React.CSSProperties = {
-  listStyle: "none",
-  padding: 0,
-  margin: 0,
-  display: "grid",
-  gap: 6,
-};
-
-const linkBtnButton: React.CSSProperties = {
-  textDecoration: "underline",
-  color: "inherit",
-  background: "transparent",
-  border: "none",
-  padding: 0,
-  fontSize: 14,
-  cursor: "pointer",
-};
-
-const muted: React.CSSProperties = { opacity: 0.65 };
 
 const input: React.CSSProperties = {
   border: "1px solid rgba(0,0,0,.12)",
@@ -367,14 +432,90 @@ const label: React.CSSProperties = {
   opacity: 0.9,
 };
 
-const circleBtn: React.CSSProperties = {
-  width: 32,
-  height: 32,
-  borderRadius: "999px",
-  border: "1px solid rgba(0,0,0,.15)",
+const mutedCard: React.CSSProperties = {
+  borderRadius: 16,
+  border: "1px solid rgba(0,0,0,.06)",
+  padding: 14,
+  fontSize: 14,
+  opacity: 0.75,
+  background: "var(--tg-theme-bg-color,#fff)",
+};
+
+const cardButton: React.CSSProperties = {
+  background: "var(--tg-theme-bg-color,#fff)",
+  border: "1px solid rgba(0,0,0,.06)",
+  borderRadius: 16,
+  padding: 12,
+  display: "flex",
+  alignItems: "center",
+  gap: 12,
+  textAlign: "left",
+  cursor: "pointer",
+  boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
+};
+
+const ownerPill: React.CSSProperties = {
+  fontSize: 11,
+  padding: "3px 8px",
+  borderRadius: 999,
+  background: "rgba(37,99,235,0.08)",
+  color: "#1D4ED8",
+  fontWeight: 500,
+};
+
+const topRightBtn: React.CSSProperties = {
+  padding: "6px 12px",
+  borderRadius: 999,
+  border: "1px solid rgba(37,99,235,0.2)",
   background: "#fff",
-  fontSize: 20,
-  lineHeight: "28px",
-  textAlign: "center",
+  fontSize: 13,
+  fontWeight: 500,
+  color: "#1D4ED8",
   cursor: "pointer",
 };
+
+function ShopAvatar({ name, url }: { name: string; url: string | null }) {
+  const size = 40;
+  const [errored, setErrored] = React.useState(false);
+
+  const initials =
+    name
+      ?.split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((s) => s[0]?.toUpperCase())
+      .join("") || "?";
+
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        borderRadius: "999px",
+        backgroundColor: "#eee",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        overflow: "hidden",
+        fontWeight: 700,
+        flexShrink: 0,
+      }}
+    >
+      {url && !errored ? (
+        <img
+          src={url}
+          alt=""
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            display: "block",
+          }}
+          onError={() => setErrored(true)}
+        />
+      ) : (
+        initials
+      )}
+    </div>
+  );
+}
