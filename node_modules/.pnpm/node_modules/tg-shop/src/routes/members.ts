@@ -90,19 +90,30 @@ membersRouter.post("/invites/accept", async (req: any, res, next) => {
     const isMaxed = inv.maxUses !== null && inv.usedCount >= (inv.maxUses ?? 0);
     if (isMaxed) return res.status(409).json({ ok: false, error: "max_uses" });
 
-    // ✅ Register user as member
+    // ✅ Register user as member (only if they don't already have membership)
     let membershipEnsured = false;
     if (userId) {
-      console.log("[INVITE] upserting membership:", { tenantId: inv.tenantId, userId });
+      console.log("[INVITE] checking existing membership:", { tenantId: inv.tenantId, userId });
       try {
-        await db.membership.upsert({
+        // Check if user already has membership
+        const existing = await db.membership.findUnique({
           where: { tenantId_userId: { tenantId: inv.tenantId, userId } },
-          update: { role: (inv as any).role ?? "MEMBER" },
-          create: { tenantId: inv.tenantId, userId, role: (inv as any).role ?? "MEMBER" },
         });
-        membershipEnsured = true;
+
+        if (existing) {
+          // User already has membership - don't change their role
+          console.log("[INVITE] user already has membership with role:", existing.role);
+          membershipEnsured = true;
+        } else {
+          // Create new membership with invite role
+          await db.membership.create({
+            data: { tenantId: inv.tenantId, userId, role: (inv as any).role ?? "MEMBER" },
+          });
+          console.log("[INVITE] created new membership with role:", (inv as any).role ?? "MEMBER");
+          membershipEnsured = true;
+        }
       } catch (err) {
-        console.error("[INVITE] membership upsert failed:", err);
+        console.error("[INVITE] membership check/create failed:", err);
       }
     } else {
       console.warn("[INVITE] no userId — telegramAuth not attached or not authenticated");
@@ -116,10 +127,22 @@ membersRouter.post("/invites/accept", async (req: any, res, next) => {
       });
     }
 
+    // Get the user's actual role in the shop
+    let userRole = "MEMBER";
+    if (userId) {
+      const membership = await db.membership.findUnique({
+        where: { tenantId_userId: { tenantId: inv.tenantId, userId } },
+      });
+      if (membership) {
+        userRole = membership.role;
+      }
+    }
+
     console.log("[INVITE] accept success:", {
       tenantId: inv.tenantId,
       slug: inv.tenant.slug,
       membershipEnsured,
+      userRole,
     });
 
     return res.json({
@@ -129,6 +152,7 @@ membersRouter.post("/invites/accept", async (req: any, res, next) => {
       slug: inv.tenant.slug,
       tenant: { id: inv.tenantId, slug: inv.tenant.slug, name: inv.tenant.name },
       membershipEnsured,
+      role: userRole, // Return the user's actual role
     });
   } catch (e) {
     console.error("[INVITE] accept failed (routes.ts):", e);

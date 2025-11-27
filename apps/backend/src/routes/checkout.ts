@@ -9,7 +9,7 @@ export const checkoutRouter = Router();
 // ---------- Checkout / Buy Now ----------
 checkoutRouter.post('/checkout', async (req: any, res) => {
   const userId = req.userId!;
-  const { shippingAddress, note } = req.body || {};
+  const { address, note, payment } = req.body || {};
 
   try {
     // 🔹 Resolve the tenant from slug (same idea as /cart)
@@ -23,7 +23,7 @@ checkoutRouter.post('/checkout', async (req: any, res) => {
     // 🔹 Create order using the correct tenant
     const order = await OrdersService.checkoutFromCartWithDetails(
       userId,
-      { shippingAddress, note },
+      { address, note, payment },
       tenantId, // 👈 pass the tenant override
     );
 
@@ -49,7 +49,7 @@ checkoutRouter.post('/checkout', async (req: any, res) => {
 // Single-item flow but same validations live in OrdersService
 checkoutRouter.post('/buy-now', async (req: any, res) => {
   const userId = req.userId!;
-  const { productId, shippingAddress, note } = req.body || {};
+  const { productId, address, note, payment } = req.body || {};
   if (!productId) return res.status(400).json({ error: 'productId required' });
   const p = await db.product.findUnique({ where: { id: String(productId) } });
   if (!p || !p.active) return res.status(400).json({ error: 'product unavailable' });
@@ -57,7 +57,7 @@ checkoutRouter.post('/buy-now', async (req: any, res) => {
     const order = await OrdersService.createSingleItemPending(
    userId,
    { id: p.id, title: p.title, price: p.price.toNumber(), currency: p.currency },
-   { shippingAddress, note }
+   { address, note, payment }
  );
     res.json(order);
   } catch (e: any) {

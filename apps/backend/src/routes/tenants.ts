@@ -5,7 +5,6 @@ import { telegramAuth } from "../api/telegramAuth";
 export const tenantRouter = Router();
 tenantRouter.use(telegramAuth);
 
-// POST /api/tenants – create tenant with full payload, default publishUniversal=true, reassign logo
 // 🔎 tiny helper for consistent log prefix
 function logStep(step: string, extra?: any) {
   if (extra !== undefined) {
@@ -18,15 +17,38 @@ function logErr(step: string, err: any) {
   console.error(`💥 [create-tenant][ERROR] ${step}:`, err?.message || err, err?.stack);
 }
 
+async function makeUniqueSlug(base: string): Promise<string> {
+  const slugBase =
+    base
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "shop";
+  let candidate = slugBase;
+  let i = 1;
+  while (await db.tenant.findUnique({ where: { slug: candidate } })) {
+    i++;
+    candidate = `${slugBase}-${i}`;
+  }
+  return candidate;
+}
+
+// 🔹 normalize any Telegram value: @user, user, https://t.me/user
+function normalizeTelegram(x?: string | null): string | null {
+  if (!x) return null;
+  const v = x.trim();
+  if (!v) return null;
+  if (v.startsWith("http://") || v.startsWith("https://")) return v;
+  if (v.startsWith("@")) return v;
+  return `https://t.me/${v}`;
+}
 
 // POST /api/tenants – create tenant with full payload, default publishUniversal=true, reassign logo
 tenantRouter.post("/tenants", async (req: any, res, next) => {
   const t0 = Date.now();
   try {
-    logStep("hit /tenants");
-    logStep("headers", { "content-type": req.headers["content-type"], auth: Boolean(req.headers.authorization) });
-    logStep("raw body keys", Object.keys(req.body || {}));
-
     const userId = req.userId;
     if (!userId) {
       logStep("no userId → 401");
@@ -37,36 +59,40 @@ tenantRouter.post("/tenants", async (req: any, res, next) => {
       name,
       publicPhone = null,
       description = null,
-      publishUniversal,
       logoImageId = null,
+      publicTelegramLink,   // 👈 now actually used
     } = req.body || {};
 
-    logStep("parsed body", { name, publicPhone, hasDesc: Boolean(description), publishUniversal, logoImageId });
+        // 🔎 DEBUG: log all incoming create-shop fields
+    console.log("🧭 [create-tenant] incoming body", {
+      userId,
+      body: req.body,
+    });
+
 
     if (!name || typeof name !== "string" || !name.trim()) {
-      logStep("invalid name → 400");
       return res.status(400).json({ error: "name_required" });
     }
-    const publishFlag =
-      typeof publishUniversal === "boolean" ? publishUniversal : true; // default TRUE
 
-    async function makeUniqueSlug(base: string): Promise<string> {
-      const slugBase =
-        base
-          .toLowerCase()
-          .normalize("NFKD")
-          .replace(/[\u0300-\u036f]/g, "")
-          .replace(/[^a-z0-9]+/g, "-")
-          .replace(/^-+|-+$/g, "")
-          .slice(0, 48) || "shop";
-      let candidate = slugBase;
-      let i = 1;
-      while (await db.tenant.findUnique({ where: { slug: candidate } })) {
-        i++;
-        candidate = `${slugBase}-${i}`;
-      }
-      return candidate;
-    }
+    const publishFlag = true;
+    // 🔹 Load current user to get Telegram username (tgId = userId)
+    const user = await db.user.findUnique({
+      where: { tgId: userId },
+      select: { username: true },
+    });
+
+    // If client sends explicit link, use it; otherwise fall back to user.username
+    const effectiveTelegram =
+      normalizeTelegram(publicTelegramLink) ??
+      normalizeTelegram(user?.username ?? null);
+
+      // 🔎 DEBUG: see what username + telegram link we ended up with
+    console.log("🧭 [create-tenant] telegram debug", {
+      userId,
+      userFromDb: user,
+      publicTelegramLinkRaw: publicTelegramLink,
+      effectiveTelegram,
+    });
 
     const result = await db.$transaction(async (tx) => {
       logStep("transaction start");
@@ -83,6 +109,7 @@ tenantRouter.post("/tenants", async (req: any, res, next) => {
           publicPhone,
           description,
           publishUniversal: publishFlag,
+          publicTelegramLink: effectiveTelegram, // 👈 default = owner's username
         },
       });
       logStep("tenant created", { id: tenant.id, slug: tenant.slug });
@@ -133,7 +160,12 @@ tenantRouter.post("/tenants", async (req: any, res, next) => {
       return finalTenant;
     });
 
-    logStep("success response", { id: result.id, slug: result.slug });
+    logStep("success response", {
+      id: result.id,
+      slug: result.slug,
+      publishUniversal: result.publishUniversal,
+      publicTelegramLink: result.publicTelegramLink,
+    });
     res.json({ tenant: result });
 
     logStep("done", { ms: Date.now() - t0 });
@@ -157,12 +189,24 @@ tenantRouter.get("/shops/list", async (req: any, res, next) => {
     }
 
     const owned = await db.membership.findMany({
-      where: { userId, role: "OWNER" },
+      where: { 
+        userId, 
+        role: "OWNER",
+        tenant: {
+          deletedAt: null  // Only show non-deleted shops
+        }
+      },
       include: { tenant: true },
     });
 
     const joined = await db.membership.findMany({
-      where: { userId, role: { in: ["MEMBER", "HELPER", "COLLABORATOR"] } },
+      where: { 
+        userId, 
+        role: { in: ["MEMBER", "HELPER", "COLLABORATOR"] },
+        tenant: {
+          deletedAt: null  // Only show non-deleted shops
+        }
+      },
       include: { tenant: true },
     });
 

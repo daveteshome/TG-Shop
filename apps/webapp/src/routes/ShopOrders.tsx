@@ -1,6 +1,6 @@
-import React from "react";
+// apps/webapp/src/routes/ShopOrders.tsx
+import React, { useMemo, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
-import { TopBar } from "../components/layout/TopBar";
 import { Loader } from "../components/common/Loader";
 import { ErrorView } from "../components/common/ErrorView";
 import { OrderListItem } from "../components/orders/OrderListItem";
@@ -8,27 +8,30 @@ import { useAsync } from "../lib/hooks/useAsync";
 import { api } from "../lib/api/index";
 import type { Order } from "../lib/types";
 
-type StatusKey = "pending" | "paid" | "shipped" | "completed" | "cancelled" | string;
-
-const STATUS_SECTIONS: { key: StatusKey; label: string }[] = [
-  { key: "pending", label: "Pending" },
-  { key: "paid", label: "Paid" },
-  { key: "shipped", label: "Shipped" },
-  { key: "completed", label: "Completed" },
-  { key: "cancelled", label: "Cancelled" },
-];
+const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string; icon: string }> = {
+  pending: { label: "Pending", bg: "#FEF3C7", text: "#92400E", icon: "⏳" },
+  confirmed: { label: "Confirmed", bg: "#DBEAFE", text: "#1E40AF", icon: "✓" },
+  paid: { label: "Paid", bg: "#D1FAE5", text: "#065F46", icon: "💳" },
+  shipped: { label: "Shipped", bg: "#E0E7FF", text: "#3730A3", icon: "🚚" },
+  delivered: { label: "Delivered", bg: "#D1FAE5", text: "#065F46", icon: "✓" },
+  completed: { label: "Completed", bg: "#D1FAE5", text: "#065F46", icon: "✓" },
+  cancelled: { label: "Cancelled", bg: "#FEE2E2", text: "#991B1B", icon: "✕" },
+};
 
 export default function ShopOrders() {
   const { slug } = useParams<{ slug: string }>();
   const nav = useNavigate();
+  const loc = useLocation();
+
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(
+    new Set(["pending", "confirmed", "paid"])
+  );
 
   const q = useAsync<Order[]>(
     async () => {
       if (!slug) return [];
-
       const qs = new URLSearchParams();
       qs.set("take", "50");
-
       const res: any = await api<any>(`/shop/${slug}/orders?${qs.toString()}`);
       const raw: any[] = Array.isArray(res) ? res : res?.items ?? [];
       return raw as Order[];
@@ -36,14 +39,10 @@ export default function ShopOrders() {
     [slug]
   );
 
-  const [expandedStatus, setExpandedStatus] = React.useState<StatusKey | null>(null);
-
-  const loc = useLocation();
-
   const params = new URLSearchParams(loc.search || "");
   const searchQ = (params.get("q") || "").trim().toLowerCase();
 
-  const filteredList = React.useMemo(() => {
+  const filteredList = useMemo(() => {
     const list = q.data || [];
     if (!searchQ) return list;
     return list.filter((o) => {
@@ -62,137 +61,120 @@ export default function ShopOrders() {
     });
   }, [q.data, searchQ]);
 
-
-    const groupedByStatus = React.useMemo(() => {
+  const groupedByStatus = useMemo(() => {
     const byStatus: Record<string, Order[]> = {};
-    const list = filteredList;
-    for (const o of list) {
-      const key = (o.status as StatusKey) || "unknown";
+    for (const o of filteredList) {
+      const key = (o.status as string) || "unknown";
       if (!byStatus[key]) byStatus[key] = [];
       byStatus[key].push(o);
     }
     return byStatus;
   }, [filteredList]);
 
+  const toggleSection = (status: string) => {
+    setExpandedSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(status)) next.delete(status);
+      else next.add(status);
+      return next;
+    });
+  };
+
+  if (q.loading) return <Loader />;
+  if (q.error) return <ErrorView error={q.error} />;
 
   const hasAnyOrders = (q.data || []).length > 0;
   const hasAnyVisibleOrders = filteredList.length > 0;
 
+  if (!hasAnyOrders) {
+    return (
+      <div style={{ padding: 20, textAlign: "center" }}>
+        <div style={{ fontSize: 64, marginBottom: 16 }}>📦</div>
+        <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>No Orders Yet</div>
+        <div style={{ fontSize: 14, color: "#666" }}>Orders from customers will appear here</div>
+      </div>
+    );
+  }
+
+  if (!hasAnyVisibleOrders) {
+    return (
+      <div style={{ padding: 16, opacity: 0.7 }}>No orders match your search.</div>
+    );
+  }
+
+  const statuses = Object.keys(groupedByStatus);
+
   return (
-    <div>
-      <TopBar title="Shop Orders" />
+    <div style={{ paddingBottom: 80 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: 16 }}>
+        {statuses.map((status) => {
+          const orders = groupedByStatus[status];
+          const config = STATUS_CONFIG[status] || STATUS_CONFIG.pending;
+          const isExpanded = expandedSections.has(status);
 
-      {q.loading ? <Loader /> : <ErrorView error={q.error} />}
-
-            {!q.loading && !q.error && !hasAnyOrders && (
-              <div style={{ opacity: 0.7, padding: 16 }}>No orders yet.</div>
-            )}
-
-            {!q.loading && hasAnyOrders && !hasAnyVisibleOrders && (
-              <div style={{ opacity: 0.7, padding: 16 }}>
-                No orders match your search.
-              </div>
-            )}
-
-            {!q.loading && hasAnyVisibleOrders && (
-              <div>
-                {STATUS_SECTIONS.map(({ key, label }) => {
-            const list = groupedByStatus[key] || [];
-            if (!list.length) return null;
-
-            const isExpanded = expandedStatus === key;
-            const visible = isExpanded ? list : list.slice(0, 5);
-
-            return (
-              <section key={key} style={{ padding: "10px 16px 6px 16px" }}>
-                {/* Colorful status header */}
-                <div style={statusHeaderStyle(key, list.length)}>
-                  <span style={{ fontWeight: 700, fontSize: 15 }}>{label}</span>
-                  <span style={{ fontSize: 13, fontWeight: 500 }}>({list.length})</span>
+          return (
+            <div
+              key={status}
+              style={{
+                background: "#fff",
+                borderRadius: 12,
+                border: "1px solid #E5E7EB",
+                overflow: "hidden",
+              }}
+            >
+              {/* Status Header - Clickable */}
+              <div
+                onClick={() => toggleSection(status)}
+                style={{
+                  padding: "12px 16px",
+                  background: config.bg,
+                  borderBottom: isExpanded ? "1px solid #E5E7EB" : "none",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  cursor: "pointer",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: 20 }}>{config.icon}</span>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: config.text }}>
+                      {config.label}
+                    </div>
+                    <div style={{ fontSize: 11, color: config.text, opacity: 0.8 }}>
+                      {orders.length} {orders.length === 1 ? "order" : "orders"}
+                    </div>
+                  </div>
                 </div>
+                <div
+                  style={{
+                    fontSize: 16,
+                    color: config.text,
+                    transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)",
+                    transition: "transform 0.3s",
+                  }}
+                >
+                  ▼
+                </div>
+              </div>
 
-                {/* Orders list */}
-                <div style={{ marginTop: 4 }}>
-                  {visible.map((o) => (
+              {/* Orders List */}
+              {isExpanded && (
+                <div>
+                  {orders.map((o, idx) => (
                     <OrderListItem
                       key={o.id}
                       order={o}
                       mode="owner"
-                      onClick={() => {
-                        if (!slug) return;
-                        nav(`/shop/${slug}/orders/${o.id}`);
-                      }}
+                      onClick={() => nav(`/shop/${slug}/orders/${o.id}`)}
                     />
                   ))}
                 </div>
-
-                {/* View all / Show less at bottom-right */}
-                {list.length > 5 && (
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "flex-end",
-                      marginTop: 4,
-                      marginBottom: 4,
-                    }}
-                  >
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setExpandedStatus(isExpanded ? null : (key as StatusKey))
-                      }
-                      style={{
-                        borderRadius: 999,
-                        border: "1px solid rgba(0,0,0,.15)",
-                        padding: "4px 12px",
-                        fontSize: 12,
-                        background: "#fff",
-                        cursor: "pointer",
-                      }}
-                    >
-                      {isExpanded ? "Show less" : "View all"}
-                    </button>
-                  </div>
-                )}
-              </section>
-            );
-          })}
-        </div>
-      )}
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
-}
-
-function statusHeaderStyle(statusKey: StatusKey, count: number): React.CSSProperties {
-  const key = (statusKey || "").toString().toLowerCase();
-
-  let bg = "#f5f5f5";
-  let color = "#555";
-
-  if (key === "pending") {
-    bg = "#fff4e5"; // soft yellow
-    color = "#b25e09";
-  } else if (key === "paid") {
-    bg = "#e6f7ff"; // light blue
-    color = "#096dd9";
-  } else if (key === "shipped") {
-    bg = "#f0f5ff"; // soft indigo
-    color = "#1d39c4";
-  } else if (key === "completed") {
-    bg = "#f6ffed"; // light green
-    color = "#389e0d";
-  } else if (key === "cancelled" || key === "canceled") {
-    bg = "#fff1f0"; // light red
-    color = "#cf1322";
-  }
-
-  return {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 6,
-    padding: "6px 12px",
-    borderRadius: 999,
-    backgroundColor: bg,
-    color,
-  };
 }

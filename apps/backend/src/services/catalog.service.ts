@@ -18,7 +18,13 @@ type ProductDTO = {
   active: boolean;
   categoryId: string | null;
   photoUrl: string | null;
-  tenant?: { id: string; slug: string; name: string; publicPhone: string | null };
+  tenant?: {
+    id: string;
+    slug: string;
+    name: string;
+    publicPhone: string | null;
+    publicTelegramLink: string | null;
+  };
 };
 
 /** ===== Image helpers ===== */
@@ -70,6 +76,7 @@ function toProductDTO(p: any): ProductDTO {
       slug: p.tenant.slug,
       name: p.tenant.name,
       publicPhone: p.tenant.publicPhone,
+      publicTelegramLink: p.tenant.publicTelegramLink ?? null,
     };
   }
 
@@ -228,7 +235,7 @@ export const CatalogService = {
       ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
       include: {
         images: { orderBy: { position: "asc" }, take: 1, include: { image: true } },
-        tenant: { select: { id: true, slug: true, name: true, publicPhone: true } },
+        tenant: { select: { id: true, slug: true, name: true, publicPhone: true, publicTelegramLink: true,} },
       },
     });
 

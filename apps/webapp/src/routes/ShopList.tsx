@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { api } from "../lib/api/index";
-import { getInitDataRaw } from "../lib/telegram";
+import { getInitDataRaw, getTelegramUser } from "../lib/telegram";
 import { createTenantFull } from "../lib/api/index";
 import { useTranslation } from "react-i18next";
 import { TopBar } from "../components/layout/TopBar";
@@ -14,6 +14,7 @@ type Tenant = {
   logoImageId?: string | null;
   logoWebUrl?: string | null;
   description?: string | null;
+  userRole?: string; // User's role in this shop
 };
 
 export default function ShopList() {
@@ -27,7 +28,9 @@ export default function ShopList() {
   const [showCreate, setShowCreate] = useState(false);
 
   const [newName, setNewName] = useState("");
-  const [newPhone, setNewPhone] = useState<string>("");
+  const [newPhone, setNewPhone] = useState<string>("+251 ");
+  const [newTelegram, setNewTelegram] = useState<string>("");
+  const [newShopType, setNewShopType] = useState<string>("");
   const [newDesc, setNewDesc] = useState<string>("");
   const [newPublish, setNewPublish] = useState<boolean>(true);
   const [logoFile, setLogoFile] = useState<File | null>(null);
@@ -35,6 +38,32 @@ export default function ShopList() {
   const logoInputRef = useRef<HTMLInputElement | null>(null);
   const navigate = useNavigate();
   const loc = useLocation();
+
+  // Auto-fill from user profile and Telegram when opening create form
+  useEffect(() => {
+    if (showCreate) {
+      (async () => {
+        try {
+          // Load from profile
+          const profile = await api<{ phone?: string | null; username?: string | null }>("/profile");
+          if (profile?.phone && !newPhone.replace("+251 ", "").trim()) {
+            setNewPhone(profile.phone);
+          }
+          
+          // Load Telegram username
+          const tgUser = getTelegramUser();
+          if (tgUser?.username && !newTelegram.trim()) {
+            setNewTelegram(`@${tgUser.username}`);
+          } else if (profile?.username && !newTelegram.trim()) {
+            setNewTelegram(`@${profile.username}`);
+          }
+        } catch (e) {
+          console.error("Failed to load profile:", e);
+        }
+      })();
+    }
+  }, [showCreate]);
+
 
   const logoPreviewUrl = useMemo(() => {
     if (!logoFile) return null;
@@ -48,6 +77,9 @@ export default function ShopList() {
   }, [logoPreviewUrl]);
 
   useEffect(() => {
+    // Scroll to top when component mounts
+    window.scrollTo(0, 0);
+    
     (async () => {
       setLoading(true);
       setErr(null);
@@ -96,6 +128,19 @@ export default function ShopList() {
       setErr("Please enter a shop name.");
       return;
     }
+
+    if (!newPhone.trim() || newPhone.trim() === "+251") {
+      setErr("Phone number is required.");
+      return;
+    }
+
+    // Validate Ethiopian phone number format
+    const phoneRegex = /^\+251\s?[79]\d{8}$/;
+    if (!phoneRegex.test(newPhone.trim())) {
+      setErr("Please enter a valid Ethiopian phone number (e.g., +251 912 345 678)");
+      return;
+    }
+
     setCreating(true);
     try {
       let logoImageId: string | null = null;
@@ -106,6 +151,8 @@ export default function ShopList() {
       const payload = {
         name: newName.trim(),
         publicPhone: newPhone.trim() || null,
+        publicTelegramLink: newTelegram.trim() || null,
+        shopType: newShopType.trim() || null,
         description: newDesc.trim() || null,
         publishUniversal: newPublish,
         logoImageId: logoImageId || null,
@@ -183,7 +230,9 @@ export default function ShopList() {
               setShowCreate((v) => !v);
               if (!showCreate) {
                 setNewName("");
-                setNewPhone("");
+                setNewPhone("+251 ");
+                setNewTelegram("");
+                setNewShopType("");
                 setNewDesc("");
                 setNewPublish(true);
                 setLogoFile(null);
@@ -255,7 +304,9 @@ export default function ShopList() {
                       marginLeft: 8,
                     }}
                   >
-                    <span style={ownerPill}>Owner</span>
+                    <span style={getRolePillStyle(s.userRole)}>
+                      {getRoleLabel(s.userRole)}
+                    </span>
                   </div>
                 </button>
               ))}
@@ -277,53 +328,133 @@ export default function ShopList() {
               background: "var(--tg-theme-bg-color,#fff)",
             }}
           >
-            {err ? <div style={{ color: "crimson" }}>{err}</div> : null}
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>Create Your Shop</div>
+            
+            {err && <div style={{ color: "crimson", fontSize: 13, padding: 10, background: "#fee", borderRadius: 8 }}>{err}</div>}
 
-            <label style={label}>Shop name</label>
+            {/* Account Info Banner */}
+            {(() => {
+              const tgUser = getTelegramUser();
+              if (tgUser) {
+                return (
+                  <div style={{ 
+                    fontSize: 12, 
+                    padding: 12, 
+                    background: "#f0f9ff", 
+                    borderRadius: 10,
+                    border: "1px solid #bae6fd",
+                    color: "#0369a1",
+                    marginBottom: 8,
+                  }}>
+                    <div style={{ fontWeight: 600, marginBottom: 6 }}>✓ Logged in as</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ 
+                        width: 32, 
+                        height: 32, 
+                        borderRadius: "50%", 
+                        background: "#0284c7",
+                        color: "#fff",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontWeight: 700,
+                        fontSize: 14,
+                      }}>
+                        {(tgUser.firstName || tgUser.username || "U")[0].toUpperCase()}
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 600 }}>{tgUser.firstName} {tgUser.lastName || ""}</div>
+                        {tgUser.username && <div style={{ fontSize: 11, opacity: 0.8 }}>@{tgUser.username}</div>}
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })()}
+
+            {/* Basic Info Section */}
+            <div style={{ fontSize: 13, fontWeight: 600, marginTop: 16, marginBottom: 8, color: "#374151" }}>
+              📋 Basic Information
+            </div>
+
+            <label style={label}>Shop Name *</label>
             <input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              placeholder="e.g., Dawit's Store"
+              placeholder="e.g., Dawit's Electronics"
               style={input}
             />
 
-            <label style={label}>Public phone</label>
-            <input
-              type="tel"
-              value={newPhone}
-              onChange={(e) => setNewPhone(e.target.value)}
-              placeholder="+49 123 4567"
+            <label style={label}>Shop Type</label>
+            <select
+              value={newShopType}
+              onChange={(e) => setNewShopType(e.target.value)}
               style={input}
-            />
+            >
+              <option value="">Select shop type...</option>
+              <option value="Electronics & Gadgets">📱 Electronics & Gadgets</option>
+              <option value="Clothing & Fashion">👕 Clothing & Fashion</option>
+              <option value="Food & Beverage">🍕 Food & Beverage</option>
+              <option value="Home & Furniture">🛋️ Home & Furniture</option>
+              <option value="Beauty & Personal Care">💄 Beauty & Personal Care</option>
+              <option value="Books & Stationery">📚 Books & Stationery</option>
+              <option value="Sports & Fitness">⚽ Sports & Fitness</option>
+              <option value="Automotive">🚗 Automotive</option>
+              <option value="Services">🔧 Services</option>
+              <option value="Grocery & Supermarket">🛒 Grocery & Supermarket</option>
+              <option value="Pharmacy & Health">💊 Pharmacy & Health</option>
+              <option value="Toys & Kids">🧸 Toys & Kids</option>
+              <option value="Jewelry & Accessories">💍 Jewelry & Accessories</option>
+              <option value="Pet Supplies">🐾 Pet Supplies</option>
+              <option value="Other">📦 Other</option>
+            </select>
 
             <label style={label}>Description</label>
             <textarea
               value={newDesc}
               onChange={(e) => setNewDesc(e.target.value)}
-              placeholder="Short description of your shop"
+              placeholder="Tell customers what you sell..."
               style={{ ...input, minHeight: 70, resize: "vertical" as const }}
             />
 
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                marginTop: 6,
-              }}
-            >
-              <input
-                id="publishUniversal"
-                type="checkbox"
-                checked={newPublish}
-                onChange={(e) => setNewPublish(e.target.checked)}
-              />
-              <label htmlFor="publishUniversal" style={{ fontSize: 13 }}>
-                Publish to Universal (recommended)
-              </label>
+            {/* Contact Section */}
+            <div style={{ fontSize: 13, fontWeight: 600, marginTop: 16, marginBottom: 8, color: "#374151" }}>
+              📞 Contact Information
             </div>
 
-            <label style={label}>Logo</label>
+            <label style={label}>Phone Number *</label>
+            <input
+              type="tel"
+              value={newPhone}
+              onChange={(e) => {
+                let val = e.target.value;
+                if (!val.startsWith("+251")) {
+                  val = "+251 " + val.replace(/^\+251\s?/, "");
+                }
+                setNewPhone(val);
+              }}
+              placeholder="+251 912 345 678"
+              style={input}
+            />
+
+            <label style={label}>Telegram Contact</label>
+            <input
+              value={newTelegram}
+              onChange={(e) => setNewTelegram(e.target.value)}
+              placeholder="@yourshop or https://t.me/yourshop"
+              style={input}
+            />
+            <div style={{ fontSize: 11, color: "#666", marginTop: -6, marginBottom: 12 }}>
+              Customers can message you directly on Telegram
+            </div>
+
+            {/* Branding Section */}
+            <div style={{ fontSize: 13, fontWeight: 600, marginTop: 16, marginBottom: 8, color: "#374151" }}>
+              🎨 Branding
+            </div>
+
+            <label style={label}>Shop Logo</label>
             <input
               ref={logoInputRef}
               type="file"
@@ -332,18 +463,19 @@ export default function ShopList() {
               onChange={(e) => setLogoFile(e.target.files?.[0] || null)}
             />
 
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <div
                 style={{
-                  width: 56,
-                  height: 56,
-                  borderRadius: 16,
-                  border: "1px solid rgba(0,0,0,.12)",
+                  width: 64,
+                  height: 64,
+                  borderRadius: 12,
+                  border: "2px dashed rgba(0,0,0,.12)",
                   overflow: "hidden",
                   background: "#fafafa",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
+                  flexShrink: 0,
                 }}
               >
                 {logoPreviewUrl ? (
@@ -353,33 +485,32 @@ export default function ShopList() {
                     style={{ width: "100%", height: "100%", objectFit: "cover" }}
                   />
                 ) : (
-                  <span style={{ fontSize: 11, opacity: 0.55 }}>No logo</span>
+                  <span style={{ fontSize: 24 }}>🏪</span>
                 )}
               </div>
 
-              <button
-                type="button"
-                onClick={() => logoInputRef.current?.click()}
-                style={btn}
-              >
-                {logoFile ? "Change logo" : "Choose logo"}
-              </button>
-
-              {logoFile && (
-                <span
+              <div style={{ flex: 1 }}>
+                <button
+                  type="button"
+                  onClick={() => logoInputRef.current?.click()}
                   style={{
-                    fontSize: 12,
-                    opacity: 0.8,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
+                    ...btn,
+                    width: "100%",
+                    background: logoFile ? "#fff" : "#f3f4f6",
+                    fontWeight: 500,
                   }}
                 >
-                  {logoFile.name}
-                </span>
-              )}
+                  {logoFile ? "✓ Change Logo" : "Upload Logo"}
+                </button>
+                {logoFile && (
+                  <div style={{ fontSize: 11, color: "#666", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {logoFile.name}
+                  </div>
+                )}
+              </div>
             </div>
 
-            <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
               <button
                 onClick={handleCreateShop}
                 disabled={creating}
@@ -453,6 +584,64 @@ const cardButton: React.CSSProperties = {
   cursor: "pointer",
   boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
 };
+
+// Helper functions for role display
+function getRoleLabel(role?: string): string {
+  switch (role) {
+    case 'OWNER':
+      return 'Owner';
+    case 'COLLABORATOR':
+      return 'Manager';
+    case 'HELPER':
+      return 'Sales';
+    case 'MEMBER':
+      return 'Member';
+    default:
+      return 'Owner'; // fallback
+  }
+}
+
+function getRolePillStyle(role?: string): React.CSSProperties {
+  const baseStyle: React.CSSProperties = {
+    fontSize: 11,
+    padding: "3px 8px",
+    borderRadius: 999,
+    fontWeight: 500,
+  };
+
+  switch (role) {
+    case 'OWNER':
+      return {
+        ...baseStyle,
+        background: "rgba(37,99,235,0.08)",
+        color: "#1D4ED8",
+      };
+    case 'COLLABORATOR':
+      return {
+        ...baseStyle,
+        background: "rgba(16,185,129,0.08)",
+        color: "#059669",
+      };
+    case 'HELPER':
+      return {
+        ...baseStyle,
+        background: "rgba(245,158,11,0.08)",
+        color: "#D97706",
+      };
+    case 'MEMBER':
+      return {
+        ...baseStyle,
+        background: "rgba(107,114,128,0.08)",
+        color: "#4B5563",
+      };
+    default:
+      return {
+        ...baseStyle,
+        background: "rgba(37,99,235,0.08)",
+        color: "#1D4ED8",
+      };
+  }
+}
 
 const ownerPill: React.CSSProperties = {
   fontSize: 11,

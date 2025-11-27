@@ -37,6 +37,16 @@ export async function createTenantFull(
   });
 }
 
+export async function getUserRole(slug: string): Promise<string | null> {
+  try {
+    const data = await api<{ role: string | null }>(`/shop/${slug}/my-role`);
+    return data.role;
+  } catch (error) {
+    console.error('Failed to get user role:', error);
+    return null;
+  }
+}
+
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers as HeadersInit);

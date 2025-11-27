@@ -14,7 +14,14 @@
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
-    "db:seed": "ts-node prisma/seed.ts"
+    "db:seed": "ts-node prisma/seed.ts",
+    "cleanup:shops": "ts-node src/scripts/cleanup-expired-shops.ts",
+    "cleanup:products": "ts-node src/scripts/cleanup-products.ts",
+    "seed:products": "ts-node src/scripts/seed-products.ts",
+    "seed:products-images": "ts-node src/scripts/seed-products-with-images.ts",
+    "seed:marketplace": "ts-node src/scripts/seed-complete-marketplace.ts",
+    "seed:marketplace-r2": "ts-node src/scripts/seed-marketplace-with-r2.ts",
+    "reseed:shop": "ts-node src/scripts/reseed-shop-products.ts"
   },
   "keywords": [],
   "author": "",
@@ -22,6 +29,7 @@
   "packageManager": "pnpm@10.14.0",
   "dependencies": {
     "@prisma/client": "^6.14.0",
+    "axios": "^1.13.2",
     "cors": "^2.8.5",
     "dotenv": "^17.2.1",
     "express": "^4.21.2",

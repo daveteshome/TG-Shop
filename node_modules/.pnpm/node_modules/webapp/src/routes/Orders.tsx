@@ -1,522 +1,437 @@
-import React, { useEffect, useMemo, useState } from "react";
+// apps/webapp/src/routes/Orders.tsx
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { TopBar } from "../components/layout/TopBar";
-import { Loader } from "../components/common/Loader";
-import { ErrorView } from "../components/common/ErrorView";
-import { OrderListItem } from "../components/orders/OrderListItem";
+import { useTranslation } from "react-i18next";
 import { api } from "../lib/api/index";
 import { money } from "../lib/format";
-import type { Order } from "../lib/types";
 
-type StatusKey = "pending" | "paid" | "shipped" | "completed" | "cancelled" | string;
-
-const STATUS_SECTIONS: { key: StatusKey; label: string }[] = [
-  { key: "paid", label: "Paid" },
-  { key: "shipped", label: "Shipped" },
-  { key: "completed", label: "Completed" },
-  { key: "cancelled", label: "Cancelled" },
-  { key: "pending", label: "Pending" },
-];
-
-// Buyer-style row (same idea as BuyerOrders)
-type BuyerOrderRow = {
+type Order = {
   id: string;
-  shortCode: string | null;
+  shortCode: string;
   status: string;
-  total: string;
+  total: number;
   currency: string;
   createdAt: string;
+  itemCount: number;
+  shop: {
+    id: string;
+    slug: string;
+    name: string;
+  };
+  buyer?: {
+    tgId: string;
+    name?: string;
+    username?: string;
+  };
 };
 
-function extractSlug(path: string | null | undefined, mode: "buyer" | "owner"): string | null {
-  if (!path) return null;
-
-  const trimmed = path.trim();
-  if (!trimmed || trimmed === "undefined" || trimmed === "null" || trimmed === "/") {
-    return null;
-  }
-
-  const match =
-    mode === "buyer"
-      ? trimmed.match(/^\/s\/([^/?]+)/)
-      : trimmed.match(/^\/shop\/([^/?]+)/);
-
-  const slug = match?.[1]?.trim();
-  if (!slug || slug === "undefined" || slug === "null") return null;
-
-  return slug;
-}
+type OrdersData = {
+  buyer: {
+    byShop: Record<string, Order[]>;
+    total: number;
+  };
+  owner: {
+    byShop: Record<string, Order[]>;
+    total: number;
+    shops: Array<{ id: string; slug: string; name: string }>;
+  };
+};
 
 export default function Orders() {
+  const { t } = useTranslation();
   const nav = useNavigate();
+  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<OrdersData | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<"buyer" | "owner">("buyer");
 
-  // Slugs remembered from previous navigation
-  const [buyerSlug, setBuyerSlug] = useState<string | null>(null);
-  const [ownerSlug, setOwnerSlug] = useState<string | null>(null);
-
-  // Read slugs once from localStorage
   useEffect(() => {
-    try {
-      const lastPage = localStorage.getItem("tgshop:lastPage") || "";
-
-      // Try to get buyer path from multiple keys
-      let lastBuyerPath =
-        localStorage.getItem("tgshop:lastBuyerShopPage") ||
-        localStorage.getItem("tgshop:lastShopPage") ||
-        "";
-
-      // If still empty, but lastPage looks like a buyer route (/s/...)
-      if (!lastBuyerPath && lastPage.startsWith("/s/")) {
-        lastBuyerPath = lastPage;
+    (async () => {
+      try {
+        setLoading(true);
+        const result = await api<OrdersData>("/user/orders/all");
+        setData(result);
+      } catch (e: any) {
+        setErr(e?.message || "Failed to load orders");
+      } finally {
+        setLoading(false);
       }
-
-      // Owner path
-      let lastOwnerPath = localStorage.getItem("tgshop:lastOwnerShopPage") || "";
-
-      // If no explicit owner path, but lastPage looks like an owner route (/shop/...)
-      if (!lastOwnerPath && lastPage.startsWith("/shop/")) {
-        lastOwnerPath = lastPage;
-      }
-
-      let buyer = extractSlug(lastBuyerPath, "buyer");
-      const owner = extractSlug(lastOwnerPath, "owner");
-
-      // if no buyer slug but we *do* have an owner slug, fall back to that
-      if (!buyer && owner) {
-        buyer = owner;
-      }
-
-      setBuyerSlug(buyer);
-      setOwnerSlug(owner);
-
-      // Optional debug logs
-      console.log("Orders.tsx lastPage =", lastPage);
-      console.log("Orders.tsx lastBuyerPath =", lastBuyerPath);
-      console.log("Orders.tsx lastOwnerPath =", lastOwnerPath);
-      console.log("Orders.tsx buyerSlug =", buyer);
-      console.log("Orders.tsx ownerSlug =", owner);
-    } catch {
-      setBuyerSlug(null);
-      setOwnerSlug(null);
-    }
+    })();
   }, []);
 
-  // ---------- Buyer side: Orders You Make ----------
-  const [buyerItems, setBuyerItems] = useState<BuyerOrderRow[]>([]);
-  const [buyerLoading, setBuyerLoading] = useState(true);
-  const [buyerErr, setBuyerErr] = useState<string | null>(null);
+  if (loading) {
+    return (
+      <div style={{ padding: 20, textAlign: "center" }}>
+        <div style={{ fontSize: 40, marginBottom: 10 }}>⏳</div>
+        <div>{t("loading", "Loading...")}</div>
+      </div>
+    );
+  }
 
-  useEffect(() => {
-    if (!buyerSlug) {
-      setBuyerItems([]);
-      setBuyerLoading(false);
-      setBuyerErr(null);
-      return;
-    }
+  if (err) {
+    return (
+      <div style={{ padding: 20, textAlign: "center", color: "#EF4444" }}>
+        <div style={{ fontSize: 40, marginBottom: 10 }}>❌</div>
+        <div>{err}</div>
+      </div>
+    );
+  }
 
-    const qs = new URLSearchParams();
-    qs.set("take", "50");
-    qs.set("tenant_slug", buyerSlug);
+  if (!data) return null;
 
-    async function loadBuyer() {
-      try {
-        setBuyerLoading(true);
-        setBuyerErr(null);
-
-        const res: any = await api<any>(`/orders?${qs.toString()}`);
-        const raw: any[] = Array.isArray(res) ? res : res?.items ?? [];
-
-        const rows: BuyerOrderRow[] = raw.map((o: any) => ({
-          id: String(o.id),
-          shortCode: o.shortCode ?? null,
-          status: String(o.status ?? "pending"),
-          total:
-            o.total && typeof (o.total as any).toString === "function"
-              ? (o.total as any).toString()
-              : String(o.total ?? "0"),
-          currency: String(o.currency ?? "ETB"),
-          createdAt: o.createdAt ? String(o.createdAt) : new Date().toISOString(),
-        }));
-
-        setBuyerItems(rows);
-      } catch (e: any) {
-        setBuyerErr(e?.message || String(e));
-      } finally {
-        setBuyerLoading(false);
-      }
-    }
-
-    void loadBuyer();
-  }, [buyerSlug]);
-
-  // ---------- Owner side: Orders You Have ----------
-  const [ownerItems, setOwnerItems] = useState<Order[]>([]);
-  const [ownerLoading, setOwnerLoading] = useState(true);
-  const [ownerErr, setOwnerErr] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!ownerSlug) {
-      setOwnerItems([]);
-      setOwnerLoading(false);
-      setOwnerErr(null);
-      return;
-    }
-
-    const qs = new URLSearchParams();
-    qs.set("take", "50");
-
-    async function loadOwner() {
-      try {
-        setOwnerLoading(true);
-        setOwnerErr(null);
-
-        const res: any = await api<any>(`/shop/${ownerSlug}/orders?${qs.toString()}`);
-        const raw: any[] = Array.isArray(res) ? res : res?.items ?? [];
-        setOwnerItems(raw as Order[]);
-      } catch (e: any) {
-        setOwnerErr(e?.message || String(e));
-      } finally {
-        setOwnerLoading(false);
-      }
-    }
-
-    void loadOwner();
-  }, [ownerSlug]);
-
-  const [expandedStatus, setExpandedStatus] = useState<StatusKey | null>(null);
-
-  // NEW: dropdown + view-all state
-  const [buyerSectionOpen, setBuyerSectionOpen] = useState(true);
-  const [ownerSectionOpen, setOwnerSectionOpen] = useState(true);
-  const [buyerExpanded, setBuyerExpanded] = useState(false);
-
-  const groupedByStatus = useMemo(() => {
-    const byStatus: Record<string, Order[]> = {};
-    const list = ownerItems || [];
-    for (const o of list) {
-      const key = (o.status as StatusKey) || "unknown";
-      if (!byStatus[key]) byStatus[key] = [];
-      byStatus[key].push(o);
-    }
-    return byStatus;
-  }, [ownerItems]);
-
-  const hasAnyBuyerOrders = buyerItems.length > 0;
-  const hasAnyOwnerOrders = ownerItems.length > 0;
-
-  const noBuyerContext = !buyerSlug;
-  const noOwnerContext = !ownerSlug;
+  const buyerShops = Object.keys(data.buyer.byShop);
+  const ownerShops = Object.keys(data.owner.byShop);
+  const hasBuyerOrders = data.buyer.total > 0;
+  const hasOwnerOrders = data.owner.total > 0;
 
   return (
-    <div>
-      <TopBar title="My Orders" />
+    <div style={{ paddingBottom: 80 }}>
+      {/* Header */}
+      <div style={{ padding: "16px 16px 12px" }}>
+        <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0, marginBottom: 4 }}>
+          📦 {t("my_orders", "My Orders")}
+        </h1>
+        <div style={{ fontSize: 13, color: "#666" }}>
+          {t("orders_subtitle", "Track all your orders")}
+        </div>
+      </div>
 
-      {/* If both sides error out, show a generic error */}
-      {buyerErr && ownerErr && (
-        <ErrorView error={buyerErr || ownerErr || "Failed to load orders."} />
-      )}
+      {/* Tabs */}
+      <div style={{ 
+        display: "flex", 
+        gap: 8, 
+        padding: "0 16px 16px",
+        borderBottom: "1px solid #E5E7EB",
+      }}>
+        <button
+          onClick={() => setActiveTab("buyer")}
+          style={{
+            flex: 1,
+            padding: "10px",
+            border: "none",
+            borderRadius: "8px 8px 0 0",
+            background: activeTab === "buyer" ? "linear-gradient(135deg, #667eea 0%, #764ba2 100%)" : "#F3F4F6",
+            color: activeTab === "buyer" ? "#fff" : "#6B7280",
+            fontWeight: 600,
+            fontSize: 14,
+            cursor: "pointer",
+            position: "relative",
+          }}
+        >
+          🛍️ {t("orders_i_made", "Orders I Made")}
+          {hasBuyerOrders && (
+            <span style={{
+              position: "absolute",
+              top: 4,
+              right: 4,
+              background: activeTab === "buyer" ? "rgba(255,255,255,0.3)" : "#667eea",
+              color: activeTab === "buyer" ? "#fff" : "#fff",
+              borderRadius: 999,
+              padding: "2px 6px",
+              fontSize: 10,
+              fontWeight: 700,
+            }}>
+              {data.buyer.total}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => setActiveTab("owner")}
+          style={{
+            flex: 1,
+            padding: "10px",
+            border: "none",
+            borderRadius: "8px 8px 0 0",
+            background: activeTab === "owner" ? "linear-gradient(135deg, #667eea 0%, #764ba2 100%)" : "#F3F4F6",
+            color: activeTab === "owner" ? "#fff" : "#6B7280",
+            fontWeight: 600,
+            fontSize: 14,
+            cursor: "pointer",
+            position: "relative",
+          }}
+        >
+          🏪 {t("orders_i_received", "Orders I Received")}
+          {hasOwnerOrders && (
+            <span style={{
+              position: "absolute",
+              top: 4,
+              right: 4,
+              background: activeTab === "owner" ? "rgba(255,255,255,0.3)" : "#667eea",
+              color: activeTab === "owner" ? "#fff" : "#fff",
+              borderRadius: 999,
+              padding: "2px 6px",
+              fontSize: 10,
+              fontWeight: 700,
+            }}>
+              {data.owner.total}
+            </span>
+          )}
+        </button>
+      </div>
 
-      <div style={{ paddingBottom: 80 }}>
-        {/* ----------- Orders You Make (buyer) ----------- */}
-        {!noBuyerContext && (
-          <section style={{ padding: "10px 16px 6px 16px" }}>
-            {/* Header as dropdown toggle */}
-            <button
-              type="button"
-              onClick={() => setBuyerSectionOpen((v) => !v)}
-              style={{
-                width: "100%",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                background: "none",
-                border: "none",
-                padding: 0,
-                marginBottom: 6,
-                cursor: "pointer",
+      {/* Content */}
+      <div style={{ padding: 16 }}>
+        {activeTab === "buyer" ? (
+          // Orders I Made
+          buyerShops.length === 0 ? (
+            <EmptyState
+              icon="🛍️"
+              title={t("no_orders_made", "No Orders Yet")}
+              subtitle={t("no_orders_made_desc", "Start shopping to see your orders here")}
+              action={{
+                label: t("browse_shops", "Browse Shops"),
+                onClick: () => nav("/joined"),
               }}
-            >
-              <span style={{ fontWeight: 700, fontSize: 15 }}>Orders You Make</span>
-              <span style={{ fontSize: 14, opacity: 0.7 }}>
-                {buyerSectionOpen ? "▲" : "▼"}
-              </span>
-            </button>
-
-            {buyerSectionOpen && (
-              <>
-                {buyerLoading && <Loader />}
-
-                {!buyerLoading && buyerErr && (
-                  <div style={{ opacity: 0.7, fontSize: 12 }}>
-                    Failed to load your buyer orders.
-                  </div>
-                )}
-
-                {!buyerLoading && !buyerErr && !hasAnyBuyerOrders && (
-                  <div style={{ opacity: 0.7, fontSize: 12 }}>
-                    You don't have any orders in this shop yet.
-                  </div>
-                )}
-
-                {!buyerLoading && !buyerErr && hasAnyBuyerOrders && (
-                  <>
-                    <div style={{ display: "grid", gap: 8 }}>
-                      {(buyerExpanded ? buyerItems : buyerItems.slice(0, 5)).map((o) => {
-                        const short = o.shortCode || o.id.slice(0, 6);
-                        const created = new Date(o.createdAt);
-                        const dateStr = created.toLocaleString();
-
-                        return (
-                          <button
-                            key={o.id}
-                            onClick={() => {
-                              if (!buyerSlug) return;
-                              nav(`/s/${buyerSlug}/orders/${o.id}`);
-                            }}
-                            style={buyerCard}
-                          >
-                            <div
-                              style={{
-                                display: "flex",
-                                justifyContent: "space-between",
-                              }}
-                            >
-                              <span style={{ fontWeight: 700 }}>#{short}</span>
-                              <span style={buyerStatusBadge(o.status)}>{o.status}</span>
-                            </div>
-                            <div
-                              style={{
-                                marginTop: 4,
-                                fontSize: 12,
-                                opacity: 0.7,
-                              }}
-                            >
-                              {dateStr}
-                            </div>
-                            <div style={{ marginTop: 6, fontWeight: 700 }}>
-                              {money(Number(o.total || "0"), o.currency)}
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {buyerItems.length > 5 && (
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "flex-end",
-                          marginTop: 4,
-                          marginBottom: 4,
-                        }}
-                      >
-                        <button
-                          type="button"
-                          onClick={() => setBuyerExpanded((v) => !v)}
-                          style={{
-                            borderRadius: 999,
-                            border: "1px solid rgba(0,0,0,.15)",
-                            padding: "4px 12px",
-                            fontSize: 12,
-                            background: "#fff",
-                            cursor: "pointer",
-                          }}
-                        >
-                          {buyerExpanded ? "Show less" : "View all"}
-                        </button>
-                      </div>
-                    )}
-                  </>
-                )}
-              </>
-            )}
-          </section>
-        )}
-
-        {/* ----------- Orders You Have (owner) ----------- */}
-        {!noOwnerContext && (ownerLoading || ownerErr || hasAnyOwnerOrders) && (
-          <section style={{ padding: "10px 16px 6px 16px" }}>
-            {/* Header as dropdown toggle */}
-            <button
-              type="button"
-              onClick={() => setOwnerSectionOpen((v) => !v)}
-              style={{
-                width: "100%",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                background: "none",
-                border: "none",
-                padding: 0,
-                marginBottom: 6,
-                cursor: "pointer",
+            />
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+              {buyerShops.map((shopId) => {
+                const orders = data.buyer.byShop[shopId];
+                const shop = orders[0].shop;
+                return (
+                  <ShopOrdersSection
+                    key={shopId}
+                    shop={shop}
+                    orders={orders}
+                    type="buyer"
+                    onOrderClick={(orderId) => nav(`/s/${shop.slug}/orders/${orderId}`)}
+                  />
+                );
+              })}
+            </div>
+          )
+        ) : (
+          // Orders I Received
+          ownerShops.length === 0 ? (
+            <EmptyState
+              icon="🏪"
+              title={t("no_orders_received", "No Orders Received")}
+              subtitle={t("no_orders_received_desc", "Orders from your customers will appear here")}
+              action={{
+                label: t("go_to_my_shops", "Go to My Shops"),
+                onClick: () => nav("/shops"),
               }}
-            >
-              <span style={{ fontWeight: 700, fontSize: 15 }}>Orders You Have</span>
-              <span style={{ fontSize: 14, opacity: 0.7 }}>
-                {ownerSectionOpen ? "▲" : "▼"}
-              </span>
-            </button>
-
-            {ownerSectionOpen && (
-              <>
-                {ownerLoading && <Loader />}
-
-                {!ownerLoading && ownerErr && (
-                  <div style={{ opacity: 0.7, fontSize: 12 }}>
-                    Failed to load orders for your shop.
-                  </div>
-                )}
-
-                {!ownerLoading && !ownerErr && hasAnyOwnerOrders && (
-                  <div>
-                    {STATUS_SECTIONS.map(({ key, label }) => {
-                      const list = groupedByStatus[key] || [];
-                      if (!list.length) return null;
-
-                      const isExpanded = expandedStatus === key;
-                      const visible = isExpanded ? list : list.slice(0, 5);
-
-                      return (
-                        <section key={key} style={{ paddingTop: 6, paddingBottom: 4 }}>
-                          {/* Colorful status header */}
-                          <div style={statusHeaderStyle(key, list.length)}>
-                            <span style={{ fontWeight: 700, fontSize: 15 }}>{label}</span>
-                            <span style={{ fontSize: 13, fontWeight: 500 }}>
-                              ({list.length})
-                            </span>
-                          </div>
-
-                          {/* Orders list (owner mode) */}
-                          <div style={{ marginTop: 4 }}>
-                            {visible.map((o) => (
-                              <OrderListItem
-                                key={o.id}
-                                order={o}
-                                mode="owner"
-                                onClick={() => {
-                                  if (!ownerSlug) return;
-                                  nav(`/shop/${ownerSlug}/orders/${o.id}`);
-                                }}
-                              />
-                            ))}
-                          </div>
-
-                          {/* View all / Show less */}
-                          {list.length > 5 && (
-                            <div
-                              style={{
-                                display: "flex",
-                                justifyContent: "flex-end",
-                                marginTop: 4,
-                                marginBottom: 4,
-                              }}
-                            >
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setExpandedStatus(
-                                    isExpanded ? null : (key as StatusKey)
-                                  )
-                                }
-                                style={{
-                                  borderRadius: 999,
-                                  border: "1px solid rgba(0,0,0,.15)",
-                                  padding: "4px 12px",
-                                  fontSize: 12,
-                                  background: "#fff",
-                                  cursor: "pointer",
-                                }}
-                              >
-                                {isExpanded ? "Show less" : "View all"}
-                              </button>
-                            </div>
-                          )}
-                        </section>
-                      );
-                    })}
-                  </div>
-                )}
-              </>
-            )}
-          </section>
+            />
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+              {ownerShops.map((shopId) => {
+                const orders = data.owner.byShop[shopId];
+                const shop = orders[0].shop;
+                return (
+                  <ShopOrdersSection
+                    key={shopId}
+                    shop={shop}
+                    orders={orders}
+                    type="owner"
+                    onOrderClick={(orderId) => nav(`/shop/${shop.slug}/orders/${orderId}`)}
+                  />
+                );
+              })}
+            </div>
+          )
         )}
       </div>
     </div>
   );
 }
 
-/* ---------- Styles ---------- */
+function ShopOrdersSection({
+  shop,
+  orders,
+  type,
+  onOrderClick,
+}: {
+  shop: { slug: string; name: string };
+  orders: Order[];
+  type: "buyer" | "owner";
+  onOrderClick: (orderId: string) => void;
+}) {
+  const [isExpanded, setIsExpanded] = useState(true);
 
-function statusHeaderStyle(statusKey: StatusKey, _count: number): React.CSSProperties {
-  const key = (statusKey || "").toString().toLowerCase();
+  return (
+    <div style={{
+      background: "#fff",
+      borderRadius: 12,
+      border: "1px solid #E5E7EB",
+      overflow: "hidden",
+    }}>
+      {/* Shop Header - Clickable */}
+      <div 
+        onClick={() => setIsExpanded(!isExpanded)}
+        style={{
+          padding: "12px 16px",
+          background: "linear-gradient(135deg, #F9FAFB 0%, #F3F4F6 100%)",
+          borderBottom: isExpanded ? "1px solid #E5E7EB" : "none",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          cursor: "pointer",
+          transition: "background 0.2s",
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = "linear-gradient(135deg, #F3F4F6 0%, #E5E7EB 100%)")}
+        onMouseLeave={(e) => (e.currentTarget.style.background = "linear-gradient(135deg, #F9FAFB 0%, #F3F4F6 100%)")}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{
+            width: 32,
+            height: 32,
+            borderRadius: "999px",
+            background: "#667eea",
+            color: "#fff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontWeight: 700,
+            fontSize: 14,
+          }}>
+            {shop.name.charAt(0).toUpperCase()}
+          </div>
+          <div>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>{shop.name}</div>
+            <div style={{ fontSize: 11, color: "#6B7280" }}>
+              {orders.length} {orders.length === 1 ? "order" : "orders"}
+            </div>
+          </div>
+        </div>
+        <div style={{
+          fontSize: 18,
+          color: "#6B7280",
+          transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)",
+          transition: "transform 0.3s",
+        }}>
+          ▼
+        </div>
+      </div>
 
-  let bg = "#f5f5f5";
-  let color = "#555";
-
-  if (key === "pending") {
-    bg = "#fff4e5"; // soft yellow
-    color = "#b25e09";
-  } else if (key === "paid") {
-    bg = "#e6f7ff"; // light blue
-    color = "#096dd9";
-  } else if (key === "shipped") {
-    bg = "#f0f5ff"; // soft indigo
-    color = "#1d39c4";
-  } else if (key === "completed") {
-    bg = "#f6ffed"; // light green
-    color = "#389e0d";
-  } else if (key === "cancelled" || key === "canceled") {
-    bg = "#fff1f0"; // light red
-    color = "#cf1322";
-  }
-
-  return {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 6,
-    padding: "6px 12px",
-    borderRadius: 999,
-    backgroundColor: bg,
-    color,
-  };
+      {/* Orders List - Collapsible */}
+      {isExpanded && (
+        <div>
+          {orders.map((order, idx) => (
+            <OrderRow
+              key={order.id}
+              order={order}
+              isLast={idx === orders.length - 1}
+              onClick={() => onOrderClick(order.id)}
+              showBuyer={type === "owner"}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
-const buyerCard: React.CSSProperties = {
-  textAlign: "left",
-  borderRadius: 12,
-  border: "1px solid rgba(0,0,0,.08)",
-  padding: 10,
-  background: "var(--tg-theme-bg-color,#fff)",
-  cursor: "pointer",
-};
-
-function buyerStatusBadge(status: string): React.CSSProperties {
-  let bg = "rgba(0,0,0,.06)";
-  let color = "#333";
-  if (status === "pending") {
-    bg = "rgba(255, 193, 7, 0.15)";
-    color = "#8a6d00";
-  } else if (status === "paid") {
-    bg = "rgba(25, 135, 84, 0.15)";
-    color = "#155724";
-  } else if (status === "shipped") {
-    bg = "rgba(13, 110, 253, 0.15)";
-    color = "#0b5ed7";
-  } else if (status === "completed") {
-    bg = "rgba(25, 135, 84, 0.15)";
-    color = "#155724";
-  } else if (status === "cancelled") {
-    bg = "rgba(220, 53, 69, 0.15)";
-    color = "#842029";
-  }
-
-  return {
-    fontSize: 11,
-    padding: "2px 8px",
-    borderRadius: 999,
-    background: bg,
-    color,
-    textTransform: "capitalize",
+function OrderRow({
+  order,
+  isLast,
+  onClick,
+  showBuyer,
+}: {
+  order: Order;
+  isLast: boolean;
+  onClick: () => void;
+  showBuyer?: boolean;
+}) {
+  const statusColors: Record<string, { bg: string; text: string; label: string }> = {
+    pending: { bg: "#FEF3C7", text: "#92400E", label: "Pending" },
+    confirmed: { bg: "#DBEAFE", text: "#1E40AF", label: "Confirmed" },
+    shipped: { bg: "#E0E7FF", text: "#3730A3", label: "Shipped" },
+    delivered: { bg: "#D1FAE5", text: "#065F46", label: "Delivered" },
+    cancelled: { bg: "#FEE2E2", text: "#991B1B", label: "Cancelled" },
   };
+
+  const status = statusColors[order.status] || statusColors.pending;
+  const date = new Date(order.createdAt).toLocaleDateString();
+
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        padding: "12px 16px",
+        borderBottom: isLast ? "none" : "1px solid #F3F4F6",
+        cursor: "pointer",
+        transition: "background 0.2s",
+      }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = "#F9FAFB")}
+      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+        <div>
+          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 2 }}>
+            #{order.shortCode || order.id.slice(0, 8)}
+          </div>
+          <div style={{ fontSize: 12, color: "#6B7280" }}>
+            {date} • {order.itemCount} {order.itemCount === 1 ? "item" : "items"}
+          </div>
+          {showBuyer && order.buyer && (
+            <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
+              👤 {order.buyer.name || order.buyer.username || "Customer"}
+            </div>
+          )}
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>
+            {money(order.total, order.currency)}
+          </div>
+          <div style={{
+            display: "inline-block",
+            padding: "2px 8px",
+            borderRadius: 6,
+            background: status.bg,
+            color: status.text,
+            fontSize: 11,
+            fontWeight: 600,
+          }}>
+            {status.label}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({
+  icon,
+  title,
+  subtitle,
+  action,
+}: {
+  icon: string;
+  title: string;
+  subtitle: string;
+  action: { label: string; onClick: () => void };
+}) {
+  return (
+    <div style={{
+      textAlign: "center",
+      padding: "60px 20px",
+      background: "#fff",
+      borderRadius: 12,
+      border: "1px solid #E5E7EB",
+    }}>
+      <div style={{ fontSize: 64, marginBottom: 16 }}>{icon}</div>
+      <div style={{ fontSize: 18, fontWeight: 600, color: "#111", marginBottom: 8 }}>
+        {title}
+      </div>
+      <div style={{ fontSize: 14, color: "#666", marginBottom: 24 }}>
+        {subtitle}
+      </div>
+      <button
+        onClick={action.onClick}
+        style={{
+          background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+          color: "#fff",
+          border: "none",
+          borderRadius: 10,
+          padding: "12px 24px",
+          fontSize: 14,
+          fontWeight: 600,
+          cursor: "pointer",
+          boxShadow: "0 2px 8px rgba(102, 126, 234, 0.3)",
+        }}
+      >
+        {action.label}
+      </button>
+    </div>
+  );
 }

@@ -1,39 +1,243 @@
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Ethiopic:wght@400;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+Ethiopic:wght@400;500;600;700&display=swap');
 
-:root { --font-am: "Noto Sans Ethiopic", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
-html, body { font-family: var(--font-am); }
-
-
+/* Modern Design System */
 :root {
-  --bg: var(--tg-theme-bg-color, #ffffff);
-  --text: var(--tg-theme-text-color, #111111);
-  --link: var(--tg-theme-link-color, #2481cc);
-  --hint: var(--tg-theme-hint-color, #8b8b8b);
-  --btn: var(--tg-theme-button-color, #2481cc);
-  --btn-text: var(--tg-theme-button-text-color, #ffffff);
+  /* Font */
+  --font-am: "Noto Sans Ethiopic", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  
+  /* Telegram Theme Variables - Override to always use light theme */
+  --tg-theme-bg-color: #ffffff !important;
+  --tg-theme-text-color: #111111 !important;
+  --tg-theme-hint-color: #6B7280 !important;
+  --tg-theme-link-color: #6366F1 !important;
+  --tg-theme-button-color: #6366F1 !important;
+  --tg-theme-button-text-color: #ffffff !important;
+  --tg-theme-secondary-bg-color: #f5f5f7 !important;
+  
+  --bg: #ffffff;
+  --text: #111111;
+  --link: #6366F1;
+  --hint: #6B7280;
+  --btn: #6366F1;
+  --btn-text: #ffffff;
+  
+  /* Modern Color Palette */
+  --color-primary: #6366F1;
+  --color-primary-light: #818CF8;
+  --color-primary-dark: #4F46E5;
+  --color-primary-bg: #EEF2FF;
+  
+  --color-secondary: #EC4899;
+  --color-secondary-light: #F472B6;
+  --color-secondary-dark: #DB2777;
+  
+  --color-success: #10B981;
+  --color-success-bg: #D1FAE5;
+  --color-success-dark: #059669;
+  
+  --color-warning: #F59E0B;
+  --color-warning-bg: #FEF3C7;
+  --color-warning-dark: #D97706;
+  
+  --color-error: #EF4444;
+  --color-error-bg: #FEE2E2;
+  --color-error-dark: #DC2626;
+  
+  --color-info: #3B82F6;
+  --color-info-bg: #DBEAFE;
+  --color-info-dark: #2563EB;
+  
+  --color-bg-primary: #FFFFFF;
+  --color-bg-secondary: #F9FAFB;
+  --color-bg-tertiary: #F3F4F6;
+  
+  --color-text-primary: #111827;
+  --color-text-secondary: #6B7280;
+  --color-text-tertiary: #9CA3AF;
+  
+  --color-border-light: #F3F4F6;
+  --color-border-main: #E5E7EB;
+  --color-border-dark: #D1D5DB;
+  
+  /* Spacing */
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 24px;
+  --spacing-2xl: 32px;
+  
+  /* Border Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-full: 9999px;
+  
+  /* Shadows */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
 }
 
-* { box-sizing: border-box; }
-html, body, #root { height: 100%; }
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  font-family: var(--font-am);
+  height: 100%;
+}
+
+#root {
+  height: 100%;
+}
+
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--text);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  line-height: 1.5;
 }
 
+/* Typography */
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+h1 { font-size: 30px; }
+h2 { font-size: 24px; }
+h3 { font-size: 20px; }
+h4 { font-size: 18px; }
+h5 { font-size: 16px; }
+h6 { font-size: 14px; }
+
+p {
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+/* Buttons */
 button {
   cursor: pointer;
+  font-family: inherit;
+  border: none;
+  background: none;
+  padding: 0;
+  transition: all 0.2s ease;
 }
+
 button:disabled {
-  opacity: .6;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
-/* Make the text cursor (caret) visible everywhere */
+button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+/* Inputs */
 input,
 textarea,
+select,
 [contenteditable="true"] {
-  caret-color: var(--tg-theme-text-color, #111);
+  caret-color: var(--color-primary);
+  font-family: inherit;
 }
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg-tertiary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-dark);
+  border-radius: var(--radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-tertiary);
+}
+
+/* Selection */
+::selection {
+  background: var(--color-primary-bg);
+  color: var(--color-primary-dark);
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.fade-in {
+  animation: fadeIn 0.3s ease-in-out;
+}
+
+.slide-up {
+  animation: slideUp 0.3s ease-out;
+}
+
+.slide-down {
+  animation: slideDown 0.3s ease-out;
+}
+
+/* Utility Classes */
+.text-primary { color: var(--color-text-primary); }
+.text-secondary { color: var(--color-text-secondary); }
+.text-tertiary { color: var(--color-text-tertiary); }
+
+.bg-primary { background: var(--color-bg-primary); }
+.bg-secondary { background: var(--color-bg-secondary); }
+.bg-tertiary { background: var(--color-bg-tertiary); }
+
+.shadow-sm { box-shadow: var(--shadow-sm); }
+.shadow-md { box-shadow: var(--shadow-md); }
+.shadow-lg { box-shadow: var(--shadow-lg); }

@@ -10,6 +10,7 @@ export default function SearchBox({
   defaultValue = "",
   autoFocus = false,
   onSelectItem,
+  inHeader = false,
 }: {
   scope: Scope;
   tenantSlug?: string;
@@ -18,7 +19,7 @@ export default function SearchBox({
   defaultValue?: string;
   autoFocus?: boolean;
   onSelectItem?: (item: any) => void;
-
+  inHeader?: boolean;
 }) {
   const [q, setQ] = useState(defaultValue);
   const [open, setOpen] = useState(false);
@@ -80,6 +81,12 @@ export default function SearchBox({
     const term = (val ?? q).trim();
     if (!term) return;
     setOpen(false);
+    
+    // Track search for personalization
+    import('../../lib/browsingHistory').then(({ trackSearch }) => {
+      trackSearch(term);
+    });
+    
     onSubmit?.(term);
   }
 
@@ -102,7 +109,16 @@ export default function SearchBox({
         // if we already have items for current text, show them again
         if (q.trim() && items.length > 0) setOpen(true);
       }}
-      style={{
+      className={inHeader ? "header-search-input" : undefined}
+      style={inHeader ? {
+        width: "100%",
+        border: "none",
+        outline: "none",
+        background: "transparent",
+        fontSize: 14,
+        color: "#fff",
+        fontWeight: 500,
+      } : {
         width: "100%", padding: "10px 12px", borderRadius: 10,
         border: "1px solid rgba(0,0,0,.15)", fontSize: 16,
       }}

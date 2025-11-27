@@ -2,7 +2,8 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
 import RightDrawer from "../common/RightDrawer";
-import { api } from "../../lib/api/index";
+import { api, getUserRole } from "../../lib/api/index";
+import type { ShopRole } from "../../lib/permissions";
 
 type ShopProfileDrawerProps = {
   open: boolean;
@@ -42,6 +43,14 @@ export default function ShopProfileDrawer({ open, onClose, tenant }: ShopProfile
 
   const [tenantId, setTenantId] = React.useState<string | null>(tenant?.id ?? null);
   const [copyBusy, setCopyBusy] = React.useState(false);
+  const [userRole, setUserRole] = React.useState<ShopRole | null>(null);
+
+  // Load user role
+  React.useEffect(() => {
+    if (open && computedSlug) {
+      getUserRole(computedSlug).then((role) => setUserRole(role as ShopRole | null));
+    }
+  }, [open, computedSlug]);
 
   // Load tenantId if missing (needed for invite creation)
   React.useEffect(() => {
@@ -184,7 +193,10 @@ export default function ShopProfileDrawer({ open, onClose, tenant }: ShopProfile
         <button
           onClick={() => {
             if (!computedSlug) return onClose();
-            go(`/shop/${computedSlug}?view=customer`);
+            // Store where we're coming from
+            sessionStorage.setItem('viewShopFrom', `/shop/${computedSlug}`);
+            onClose();
+            nav(`/s/${computedSlug}`);
           }}
           style={{
             border: "1px solid rgba(0,0,0,.1)",
@@ -197,44 +209,51 @@ export default function ShopProfileDrawer({ open, onClose, tenant }: ShopProfile
             width: "100%",
           }}
         >
-          View as customer
+          👁️ View Shop
         </button>
       </div>
 
       {/* Sections */}
       <div style={{ overflowY: "auto" }}>
-        <div style={sectionTitle}>Manage</div>
+        {/* Manage Section - Owner & Collaborator only */}
+        {(userRole === "OWNER" || userRole === "COLLABORATOR") && (
+          <>
+            <div style={sectionTitle}>Manage</div>
 
-        <div
-          style={row}
-          onClick={() => {
-            if (!computedSlug) return onClose();
-            go(`/shop/${computedSlug}/settings`);
-          }}
-        >
-          ⚙️ Shop settings
-        </div>
+            <div
+              style={row}
+              onClick={() => {
+                if (!computedSlug) return onClose();
+                go(`/shop/${computedSlug}/settings`);
+              }}
+            >
+              ⚙️ Shop settings
+            </div>
 
-        <div
-          style={row}
-          onClick={() => {
-            if (!computedSlug) return onClose();
-            go(`/shop/${computedSlug}/categories`);
-          }}
-        >
-          🗂️ Categories
-        </div>
+            <div
+              style={row}
+              onClick={() => {
+                if (!computedSlug) return onClose();
+                go(`/shop/${computedSlug}/categories`);
+              }}
+            >
+              🗂️ Categories
+            </div>
 
-        <div
-          style={row}
-          onClick={() => {
-            if (!computedSlug) return onClose();
-            go(`/shop/${computedSlug}/invitations`);
-          }}
-        >
-          👥 Invitations & roles
-        </div>
+            {/* Invitations - Owner & Collaborator */}
+            <div
+              style={row}
+              onClick={() => {
+                if (!computedSlug) return onClose();
+                go(`/shop/${computedSlug}/invitations`);
+              }}
+            >
+              👥 Team
+            </div>
+          </>
+        )}
 
+        {/* Catalog & Sales - All roles */}
         <div style={sectionTitle}>Catalog & Sales</div>
 
         <div
@@ -257,40 +276,50 @@ export default function ShopProfileDrawer({ open, onClose, tenant }: ShopProfile
           🧾 Orders
         </div>
 
-        <div style={sectionTitle}>Analytics</div>
+        {/* Analytics - Owner & Collaborator only */}
+        {(userRole === "OWNER" || userRole === "COLLABORATOR") && (
+          <>
+            <div style={sectionTitle}>Analytics</div>
 
-        <div
-          style={row}
-          onClick={() => {
-            if (!computedSlug) return onClose();
-            go(`/shop/${computedSlug}/analytics`);
-          }}
-        >
-          📈 Overview
-        </div>
+            <div
+              style={row}
+              onClick={() => {
+                if (!computedSlug) return onClose();
+                go(`/shop/${computedSlug}/analytics`);
+              }}
+            >
+              📈 Overview
+            </div>
 
-        <div
-          style={row}
-          onClick={() => {
-            if (!computedSlug) return onClose();
-            go(`/shop/${computedSlug}/analytics/top-products`);
-          }}
-        >
-          ⭐ Top products
-        </div>
+            <div
+              style={row}
+              onClick={() => {
+                if (!computedSlug) return onClose();
+                go(`/shop/${computedSlug}/analytics/top-products`);
+              }}
+            >
+              ⭐ Top products
+            </div>
+          </>
+        )}
 
-        <div style={sectionTitle}>Publishing</div>
+        {/* Publishing - Owner only */}
+        {userRole === "OWNER" && (
+          <>
+            <div style={sectionTitle}>Publishing</div>
 
-        <div
-          style={row}
-          onClick={() => {
-            if (!computedSlug) return onClose();
-            go(`/shop/${computedSlug}/settings`); // later add toggle in settings
-          }}
-          title="Toggle will be implemented later in Settings"
-        >
-          🌍 Publish to Universal
-        </div>
+            <div
+              style={row}
+              onClick={() => {
+                if (!computedSlug) return onClose();
+                go(`/shop/${computedSlug}/settings`);
+              }}
+              title="Toggle will be implemented later in Settings"
+            >
+              🌍 Publish to Universal
+            </div>
+          </>
+        )}
       </div>
     </RightDrawer>
   );

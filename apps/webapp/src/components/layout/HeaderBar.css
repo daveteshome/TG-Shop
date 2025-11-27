@@ -1,0 +1,14 @@
+/* Header search input styling */
+.header-search-input {
+  width: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 14px;
+  color: #fff;
+  font-weight: 500;
+}
+
+.header-search-input::placeholder {
+  color: rgba(255, 255, 255, 0.7);
+}

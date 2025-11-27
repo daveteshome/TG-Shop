@@ -7,6 +7,7 @@ import { useCartCount, refreshCartCount } from "../../lib/store";
 import SearchBox from "../../components/search/SearchBox";
 import { getProfile } from "../../lib/api/profile";
 import type { Profile as UserProfile } from "../../lib/types";
+import "./HeaderBar.css";
 
 
 type Props = {
@@ -35,11 +36,19 @@ function FavoriteHeaderButton() {
       title={n > 0 ? `Favorites (${n})` : "Favorites"}
       style={{
         position: "relative",
-        background: "none",
-        border: "none",
-        fontSize: 20,
+        background: "rgba(255, 255, 255, 0.95)",
+        border: "1px solid rgba(255, 255, 255, 0.3)",
+        borderRadius: "10px",
+        width: "36px",
+        height: "36px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: 18,
         cursor: "pointer",
-        lineHeight: 1,
+        color: "#EF4444",
+        backdropFilter: "blur(10px)",
+        boxShadow: "0 2px 8px rgba(0, 0, 0, 0.1)",
       }}
     >
       ♥
@@ -49,12 +58,14 @@ function FavoriteHeaderButton() {
             position: "absolute",
             top: -6,
             right: -6,
-            background: "#e11",
+            background: "#EF4444",
             color: "#fff",
             borderRadius: 999,
             fontSize: 10,
-            padding: "1px 5px",
+            fontWeight: 600,
+            padding: "2px 6px",
             lineHeight: 1,
+            boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
           }}
         >
           {n}
@@ -86,11 +97,18 @@ function CartHeaderButton() {
       title={n > 0 ? `Cart (${n})` : "Cart"}
       style={{
         position: "relative",
-        background: "none",
-        border: "none",
-        fontSize: 20,
+        background: "rgba(255, 255, 255, 0.95)",
+        border: "1px solid rgba(255, 255, 255, 0.3)",
+        borderRadius: "10px",
+        width: "36px",
+        height: "36px",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: 18,
         cursor: "pointer",
-        lineHeight: 1,
+        backdropFilter: "blur(10px)",
+        boxShadow: "0 2px 8px rgba(0, 0, 0, 0.1)",
       }}
     >
       🛒
@@ -100,12 +118,14 @@ function CartHeaderButton() {
             position: "absolute",
             top: -6,
             right: -6,
-            background: "#e11",
+            background: "#EF4444",
             color: "#fff",
             borderRadius: 999,
             fontSize: 10,
-            padding: "1px 5px",
+            fontWeight: 600,
+            padding: "2px 6px",
             lineHeight: 1,
+            boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
           }}
         >
           {n}
@@ -135,15 +155,18 @@ function ProfileHeaderButton({
         height: 36,
         width: 36,
         borderRadius: "999px",
-        border: "1px solid rgba(0,0,0,.08)",
+        border: "2px solid rgba(255, 255, 255, 0.3)",
         display: "inline-flex",
         alignItems: "center",
         justifyContent: "center",
-        background: "#eee",
+        background: avatarUrl ? "rgba(255, 255, 255, 0.95)" : "rgba(255, 255, 255, 0.95)",
         cursor: "pointer",
         overflow: "hidden",
-        fontSize: 12,
+        fontSize: 13,
         fontWeight: 600,
+        color: avatarUrl ? "#fff" : "#667eea",
+        backdropFilter: "blur(10px)",
+        boxShadow: "0 2px 8px rgba(0, 0, 0, 0.1)",
       }}
     >
       {avatarUrl ? (
@@ -228,6 +251,12 @@ export default function HeaderBar({
 
   const path = routedPath(loc);
 
+  // Clear admin tracking when navigating away from admin pages
+  React.useEffect(() => {
+    if (!path.startsWith('/admin')) {
+      localStorage.removeItem("tgshop:lastAdminPage");
+    }
+  }, [path]);
 
   // Section detection on normalized path
   const isUniversalSection = path === "/" || path.startsWith("/universal");
@@ -240,7 +269,14 @@ export default function HeaderBar({
   const isOwnerShopHome = /^\/shop\/[^/]+$/.test(path);
   const isBuyerShopHome = /^\/s\/[^/]+$/.test(path);
   const isMyShopHome = path === "/shops" || path === "/my";
-  const isRootLike = isUniversalHome || isOwnerShopHome || isBuyerShopHome || isMyShopHome;
+  
+  // Show back button if we came from admin, even on shop home pages
+  const cameFromAdmin = !!localStorage.getItem("tgshop:lastAdminPage");
+  
+  // Check if buyer shop has a referrer (came from View Shop button)
+  const buyerShopHasReferrer = isBuyerShopHome && !!sessionStorage.getItem('viewShopFrom');
+  
+  const isRootLike = !cameFromAdmin && !buyerShopHasReferrer && (isUniversalHome || isOwnerShopHome || isBuyerShopHome || isMyShopHome);
 
   const slug = inShop ? path.split("/")[2] : null;
   const showBack = !isRootLike;
@@ -255,8 +291,16 @@ export default function HeaderBar({
   const isOwnerOrdersList = /^\/shop\/[^/]+\/orders\/?$/.test(path);
   const isOwnerCategories = /^\/shop\/[^/]+\/categories\/?$/.test(path);
   const isOwnerInvitations = /^\/shop\/[^/]+\/invitations\/?$/.test(path);
+  const isInventoryHistory = /^\/shop\/[^/]+\/inventory-history\/?$/.test(path);
+  const isTeamPerformance = /^\/shop\/[^/]+\/team-performance\/?$/.test(path);
 
   const isFavorites = path === "/favorites";
+  
+  // Admin page detection
+  const isAdminProducts = path === "/admin/products";
+  const isAdminUsers = path === "/admin/users";
+  const isAdminShops = path === "/admin/shops";
+  const isAdminCategories = path === "/admin/categories";
 
 
   // Shared query in URL (?q=...)
@@ -293,8 +337,30 @@ export default function HeaderBar({
 
 
   // Smart back: prefer real history; otherwise compute fallback per route
-  // Smart back: prefer real history; otherwise compute fallback per route
   function smartBack() {
+  // Check if we're on owner shop home with add product panel open
+  const ownerShopHomeMatch = path.match(/^\/shop\/[^/]+\/?$/);
+  if (ownerShopHomeMatch) {
+    // Try to close any open panel first
+    const panelClosed = window.dispatchEvent(new CustomEvent("tgshop:close-panel", { cancelable: true }));
+    if (!panelClosed) {
+      // Panel was open and closed it, don't navigate
+      return;
+    }
+  }
+  
+  // Special handling for buyer shop pages - check if we have an explicit "from" location
+  const buyerShopMatch = path.match(/^\/s\/[^/]+\/?$/);
+  if (buyerShopMatch) {
+    const from = sessionStorage.getItem('viewShopFrom');
+    if (from) {
+      sessionStorage.removeItem('viewShopFrom');
+      nav(from, { replace: true });
+      return;
+    }
+  }
+  
+  // Always try browser history first - this was working before
   if (window.history.length > 1) {
     nav(-1);
     return;
@@ -335,7 +401,7 @@ export default function HeaderBar({
     return;
   }
 
-  // /s/:slug/p/:id → last shop page (or /s/:slug)
+  // /s/:slug/p/:id → fallback navigation
   {
     const m = path.match(/^\/s\/([^/]+)\/p\/[^/]+/);
     if (m) {
@@ -347,7 +413,7 @@ export default function HeaderBar({
     }
   }
 
-  // /shop/:slug/p/:id → last owner shop page (or /shop/:slug)
+  // /shop/:slug/p/:id → fallback navigation
   {
     const m = path.match(/^\/shop\/([^/]+)\/p\/[^/]+/);
     if (m) {
@@ -419,16 +485,72 @@ export default function HeaderBar({
     }
   }
 
-   // OWNER side drawer pages: /shop/:slug/(settings|categories|invitations|top-products) → back to shop root
+  // OWNER analytics sub-pages: inventory-history, team-performance → back to analytics
+  {
+    const m = path.match(/^\/shop\/([^/]+)\/(inventory-history|team-performance)(?:\/|$)/);
+    if (m) {
+      const slug = m[1];
+      nav(`/shop/${slug}/analytics`, { replace: true });
+      return;
+    }
+  }
+
+  // OWNER analytics/top-products → back to analytics
+  {
+    const m = path.match(/^\/shop\/([^/]+)\/analytics\/top-products(?:\/|$)/);
+    if (m) {
+      const slug = m[1];
+      nav(`/shop/${slug}/analytics`, { replace: true });
+      return;
+    }
+  }
+
+  // OWNER team member detail: /shop/:slug/team/:userId → back to invitations
+  {
+    const m = path.match(/^\/shop\/([^/]+)\/team\/[^/]+/);
+    if (m) {
+      const slug = m[1];
+      nav(`/shop/${slug}/invitations`, { replace: true });
+      return;
+    }
+  }
+
+  // OWNER side drawer pages: /shop/:slug/(settings|categories|invitations|analytics) → back to shop root
   {
     const m = path.match(
-      /^\/shop\/([^/]+)\/(settings|categories|invitations|top-products|analytics)(?:\/|$)/
+      /^\/shop\/([^/]+)\/(settings|categories|invitations|analytics)(?:\/|$)/
     );
     if (m) {
       const slug = m[1];
       nav(`/shop/${slug}`, { replace: true });
       return;
     }
+  }
+
+  // ADMIN pages fallback: check for specific referrers first
+  if (path.startsWith('/admin/') && path !== '/admin') {
+    // Check if we have a stored referrer for this page
+    if (path === '/admin/products') {
+      const referrer = localStorage.getItem("tgshop:adminProductsReferrer");
+      if (referrer) {
+        localStorage.removeItem("tgshop:adminProductsReferrer");
+        nav(referrer, { replace: true });
+        return;
+      }
+    }
+    
+    if (path === '/admin/shops') {
+      const referrer = localStorage.getItem("tgshop:adminShopsReferrer");
+      if (referrer) {
+        localStorage.removeItem("tgshop:adminShopsReferrer");
+        nav(referrer, { replace: true });
+        return;
+      }
+    }
+    
+    // Default: go to admin home
+    nav('/admin', { replace: true });
+    return;
   }
 
   // Generic fallback
@@ -442,13 +564,15 @@ export default function HeaderBar({
         position: "sticky",
         top: 0,
         zIndex: 40,
-        background: "#fff",
-        borderBottom: "1px solid #eee",
+        height: 56,
+        background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+        borderBottom: "none",
+        boxShadow: "0 2px 8px rgba(102, 126, 234, 0.3)",
       }}
     >
       <div
         style={{
-          height: 56,
+          height: "100%",
           display: "flex",
           alignItems: "center",
           gap: 8,
@@ -456,13 +580,13 @@ export default function HeaderBar({
         }}
       >
         {showBack ? (
-          <button aria-label="Back" onClick={smartBack} style={iconBtn}>
+          <button aria-label="Back" onClick={smartBack} style={iconBtnLight}>
             ←
           </button>
         ) : (
           <button
             onClick={onTitleClick}
-            style={{ ...iconBtn, visibility: onTitleClick ? "visible" : "hidden" }}
+            style={{ ...iconBtnLight, visibility: onTitleClick ? "visible" : "hidden" }}
             aria-label="Title action"
           >
             {title === "←" ? "←" : "·"}
@@ -479,10 +603,14 @@ export default function HeaderBar({
               display: "flex",
               alignItems: "center",
               gap: 8,
-              padding: "10px 12px",
+              padding: "8px 12px",
+              background: "rgba(255, 255, 255, 0.2)",
+              borderRadius: "10px",
+              border: "1px solid rgba(255, 255, 255, 0.3)",
+              backdropFilter: "blur(10px)",
             }}
           >
-            <span style={{ opacity: 0.6 }}>🔎</span>
+            <span style={{ opacity: 0.9, color: "#fff" }}>🔎</span>
             <div style={{ flex: 1 }}>
               {isShopsList ? (
                 // /shops -> filter my owned shops
@@ -491,13 +619,7 @@ export default function HeaderBar({
                   value={searchQ}
                   onChange={(e) => updateSearchQuery(e.target.value)}
                   placeholder="Search your shops…"
-                  style={{
-                    width: "100%",
-                    border: "none",
-                    outline: "none",
-                    background: "transparent",
-                    fontSize: 14,
-                  }}
+                  className="header-search-input"
                 />
               ) : isJoinedShopsList ? (
                 // /joined -> filter shops I joined
@@ -506,13 +628,7 @@ export default function HeaderBar({
                   value={searchQ}
                   onChange={(e) => updateSearchQuery(e.target.value)}
                   placeholder="Search joined shops…"
-                  style={{
-                    width: "100%",
-                    border: "none",
-                    outline: "none",
-                    background: "transparent",
-                    fontSize: 14,
-                  }}
+                  className="header-search-input"
                 />
               ) : isOwnerOrdersList ? (
                 // /shop/:slug/orders -> search orders in my shop
@@ -521,13 +637,7 @@ export default function HeaderBar({
                   value={searchQ}
                   onChange={(e) => updateSearchQuery(e.target.value)}
                   placeholder="Search shop orders…"
-                  style={{
-                    width: "100%",
-                    border: "none",
-                    outline: "none",
-                    background: "transparent",
-                    fontSize: 14,
-                  }}
+                  className="header-search-input"
                 />
               ) : isOwnerCategories ? (
                 // /shop/:slug/categories -> search categories
@@ -536,13 +646,7 @@ export default function HeaderBar({
                   value={searchQ}
                   onChange={(e) => updateSearchQuery(e.target.value)}
                   placeholder="Search categories…"
-                  style={{
-                    width: "100%",
-                    border: "none",
-                    outline: "none",
-                    background: "transparent",
-                    fontSize: 14,
-                  }}
+                  className="header-search-input"
                 />
               ) : isOwnerInvitations ? (
                 // /shop/:slug/invitations -> search members / roles
@@ -551,13 +655,25 @@ export default function HeaderBar({
                   value={searchQ}
                   onChange={(e) => updateSearchQuery(e.target.value)}
                   placeholder="Search members & roles…"
-                  style={{
-                    width: "100%",
-                    border: "none",
-                    outline: "none",
-                    background: "transparent",
-                    fontSize: 14,
-                  }}
+                  className="header-search-input"
+                />
+              ) : isInventoryHistory ? (
+                // /shop/:slug/inventory-history -> search inventory movements
+                <input
+                  type="search"
+                  value={searchQ}
+                  onChange={(e) => updateSearchQuery(e.target.value)}
+                  placeholder="Search products, reasons…"
+                  className="header-search-input"
+                />
+              ) : isTeamPerformance ? (
+                // /shop/:slug/team-performance -> search team members
+                <input
+                  type="search"
+                  value={searchQ}
+                  onChange={(e) => updateSearchQuery(e.target.value)}
+                  placeholder="Search team members…"
+                  className="header-search-input"
                 />
               ) : isBuyerOrdersList ? (
                 // /s/:slug/orders -> buyer orders (previous step)
@@ -566,13 +682,7 @@ export default function HeaderBar({
                   value={searchQ}
                   onChange={(e) => updateSearchQuery(e.target.value)}
                   placeholder="Search your orders…"
-                  style={{
-                    width: "100%",
-                    border: "none",
-                    outline: "none",
-                    background: "transparent",
-                    fontSize: 14,
-                  }}
+                  className="header-search-input"
                 />
               ) : isBuyerCart ? (
                 // /s/:slug/cart -> buyer cart (previous step)
@@ -581,13 +691,7 @@ export default function HeaderBar({
                   value={searchQ}
                   onChange={(e) => updateSearchQuery(e.target.value)}
                   placeholder="Search in cart…"
-                  style={{
-                    width: "100%",
-                    border: "none",
-                    outline: "none",
-                    background: "transparent",
-                    fontSize: 14,
-                  }}
+                  className="header-search-input"
                 />
               ) : isFavorites ? (
                 // /favorites -> filter universal favorites
@@ -596,13 +700,43 @@ export default function HeaderBar({
                   value={searchQ}
                   onChange={(e) => updateSearchQuery(e.target.value)}
                   placeholder="Search favorites…"
-                  style={{
-                    width: "100%",
-                    border: "none",
-                    outline: "none",
-                    background: "transparent",
-                    fontSize: 14,
-                  }}
+                  className="header-search-input"
+                />
+              ) : isAdminProducts ? (
+                // /admin/products -> search products
+                <input
+                  type="search"
+                  value={searchQ}
+                  onChange={(e) => updateSearchQuery(e.target.value)}
+                  placeholder="Search products (title, shop)…"
+                  className="header-search-input"
+                />
+              ) : isAdminUsers ? (
+                // /admin/users -> search users
+                <input
+                  type="search"
+                  value={searchQ}
+                  onChange={(e) => updateSearchQuery(e.target.value)}
+                  placeholder="Search users (name, username, ID)…"
+                  className="header-search-input"
+                />
+              ) : isAdminShops ? (
+                // /admin/shops -> search shops
+                <input
+                  type="search"
+                  value={searchQ}
+                  onChange={(e) => updateSearchQuery(e.target.value)}
+                  placeholder="Search shops (name, slug, owner)…"
+                  className="header-search-input"
+                />
+              ) : isAdminCategories ? (
+                // /admin/categories -> search categories
+                <input
+                  type="search"
+                  value={searchQ}
+                  onChange={(e) => updateSearchQuery(e.target.value)}
+                  placeholder="Search categories (all levels)…"
+                  className="header-search-input"
                 />
               ) : (
                 // Default: product search (universal / owner / buyer)
@@ -618,6 +752,7 @@ export default function HeaderBar({
                       ? "Search this shop…"
                       : "Search…"
                   }
+                  inHeader={true}
                   onSubmit={(q) => {
                     nav(`${productBasePath}?q=${encodeURIComponent(q)}`);
                   }}
@@ -643,10 +778,10 @@ export default function HeaderBar({
         </div>
 
 
-        {/* Right side: favorites in universal, cart in buyer, profile in /shops */}
-        {rightOverride && !isShopsList ? (
+        {/* Right side: favorites in universal, cart in buyer, profile in /shops and /joined */}
+        {rightOverride && !isShopsList && !isJoinedShopsList ? (
           rightOverride
-        ) : isShopsList ? (
+        ) : isShopsList || isJoinedShopsList ? (
           <ProfileHeaderButton
             user={userProfile}
             initials={getUserInitials(userProfile)}
@@ -657,7 +792,7 @@ export default function HeaderBar({
         ) : inBuyerShop ? (
           <CartHeaderButton />
         ) : (
-          <span style={{ ...iconBtn, visibility: "hidden" }} />
+          <span style={{ ...iconBtnLight, visibility: "hidden" }} />
         )}
 
 
@@ -673,6 +808,24 @@ const iconBtn: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   justifyContent: "center",
-  border: "1px solid #eef2f7",
-  background: "#fff",
+  border: "1px solid #E5E7EB",
+  background: "#F9FAFB",
+  color: "#111827",
+  fontSize: "18px",
+  fontWeight: 600,
+};
+
+const iconBtnLight: React.CSSProperties = {
+  height: 36,
+  width: 36,
+  borderRadius: 10,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  border: "1px solid rgba(255, 255, 255, 0.3)",
+  background: "rgba(255, 255, 255, 0.2)",
+  color: "#fff",
+  fontSize: "18px",
+  fontWeight: 600,
+  backdropFilter: "blur(10px)",
 };

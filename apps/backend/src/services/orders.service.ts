@@ -14,7 +14,11 @@ export const OrdersService = {
   async createSingleItemPending(
     tgId: string,
     product: { id: string; title: string; price: number | string | Prisma.Decimal; currency: string },
-    opts: { shippingAddress?: string | null; note?: string | null } = {},
+    opts: { 
+      address?: any; 
+      note?: string | null;
+      payment?: { method?: string; ref?: string | null; receiptImageId?: string | null };
+    } = {},
     tenantIdOverride?: string,
   ) {
     const tenantId = tenantIdOverride ?? (await getTenantId());
@@ -26,6 +30,18 @@ export const OrdersService = {
     const unitPrice = new Prisma.Decimal(product.price);
     const total = unitPrice; // qty=1
 
+    // Extract address information
+    const address = opts.address || {};
+    
+    // Prepare payment proof if bank transfer
+    const paymentMethod = opts.payment?.method || 'COD';
+    const paymentProof = paymentMethod === 'BANK' && opts.payment?.ref 
+      ? { 
+          transactionRef: opts.payment.ref,
+          receiptImageId: opts.payment.receiptImageId || null
+        }
+      : null;
+
     return db.order.create({
       data: {
         tenantId,
@@ -33,8 +49,19 @@ export const OrdersService = {
         total,
         currency: p.currency,
         status: OrderStatus.pending,
-        addressId: null,                 // not capturing address here
-        note: opts.note ?? null,         // store note in `note`
+        addressId: null,
+        note: opts.note ?? null,
+        // Store address snapshot
+        shipLine1: address.line1 || null,
+        shipLine2: address.line2 || null,
+        shipCity: address.city || null,
+        shipRegion: address.region || null,
+        shipCountry: address.country || null,
+        shipPostal: address.postalCode || null,
+        // Store payment information
+        paymentMethod: paymentMethod,
+        paymentProof: paymentProof as any,
+        paymentStatus: paymentMethod === 'BANK' ? 'pending' : null,
         items: {
           create: [{
             tenantId,
@@ -96,7 +123,11 @@ export const OrdersService = {
 
   async checkoutFromCartWithDetails(
     userId: string,
-    opts: { shippingAddress?: string | null; note?: string | null } = {},
+    opts: { 
+      address?: any; 
+      note?: string | null;
+      payment?: { method?: string; ref?: string | null; receiptImageId?: string | null };
+    } = {},
     tenantIdOverride?: string,
   ) {
     const tenantId = tenantIdOverride ?? (await getTenantId());
@@ -119,6 +150,18 @@ export const OrdersService = {
       new Prisma.Decimal(0),
     );
 
+    // Extract address information
+    const address = opts.address || {};
+    
+    // Prepare payment proof if bank transfer
+    const paymentMethod = opts.payment?.method || 'COD';
+    const paymentProof = paymentMethod === 'BANK' && opts.payment?.ref 
+      ? { 
+          transactionRef: opts.payment.ref,
+          receiptImageId: opts.payment.receiptImageId || null
+        }
+      : null;
+
     const order = await db.order.create({
       data: {
         tenantId,
@@ -126,8 +169,19 @@ export const OrdersService = {
         total,
         currency,
         status: OrderStatus.pending,
-        addressId: null,            // not capturing address here
+        addressId: null,
         note: opts.note ?? null,
+        // Store address snapshot
+        shipLine1: address.line1 || null,
+        shipLine2: address.line2 || null,
+        shipCity: address.city || null,
+        shipRegion: address.region || null,
+        shipCountry: address.country || null,
+        shipPostal: address.postalCode || null,
+        // Store payment information
+        paymentMethod: paymentMethod,
+        paymentProof: paymentProof as any,
+        paymentStatus: paymentMethod === 'BANK' ? 'pending' : null,
         items: {
           create: cart.items.map((it) => ({
             tenantId,

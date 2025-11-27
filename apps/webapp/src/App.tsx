@@ -6,6 +6,7 @@ import { api } from "./lib/api/index";
 import Home from "./routes/Home";
 import Cart from "./routes/Cart";
 import Profile from "./routes/Profile";
+import Settings from "./routes/Settings";
 import ShopOrderDetail from "./routes/ShopOrderDetail";
 import ProductDetail from "./routes/ProductDetail";
 import OwnerProductDetail from "./routes/OwnerProductDetail";
@@ -17,14 +18,27 @@ import ShopList from "./routes/ShopList";
 import ShopSettings from "./routes/ShopSettings";
 import ShopCategories from "./routes/ShopCategories";
 import ShopInvitations from "./routes/ShopInvitations";
+import ShopMemberDetail from "./routes/ShopMemberDetail";
 import ShopOrders from "./routes/ShopOrders";
 import ShopAnalytics from "./routes/ShopAnalytics";
 import ShopTopProducts from "./routes/ShopTopProducts";
+import InventoryHistory from "./routes/InventoryHistory";
+import TeamPerformance from "./routes/TeamPerformance";
 import JoinedShops from "./routes/JoinedShops";
 import ShopBuyer from "./routes/ShopBuyer";
 import BuyerOrders from "./routes/BuyerOrders";
 import BuyerOrderDetail from "./routes/BuyerOrderDetail";
 import Orders from "./routes/Orders";
+import PlatformAdmin from "./routes/PlatformAdmin";
+import AdminShops from "./routes/AdminShops";
+import AdminUsers from "./routes/AdminUsers";
+import AdminProducts from "./routes/AdminProducts";
+import AdminShopDetail from "./routes/AdminShopDetail";
+import AdminUserDetail from "./routes/AdminUserDetail";
+import AdminSettings from "./routes/AdminSettings";
+import AdminReports from "./routes/AdminReports";
+import AdminUniversal from "./routes/AdminUniversal";
+import AdminCategories from "./routes/AdminCategories";
 
 import ErrorBoundary from "./components/common/ErrorBoundary";
 import HeaderBar from "./components/layout/HeaderBar";
@@ -43,10 +57,9 @@ const appStyle: React.CSSProperties = {
   maxWidth: 860,
   margin: "0 auto",
   padding: 10,
-  fontFamily:
-    "system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif",
-  background: "var(--tg-theme-bg-color, #fff)",
-  color: "var(--tg-theme-text-color, #111)",
+  fontFamily: "var(--font-am)",
+  background: "var(--color-bg-secondary)",
+  color: "var(--color-text-primary)",
   minHeight: "100vh",
   boxSizing: "border-box",
 };
@@ -85,7 +98,9 @@ function getBackTarget(pathname: string): string | number | null {
     const slug = owner[1];
     const isRoot = pathname === `/shop/${slug}` || pathname === `/shop/${slug}/`;
     if (isRoot) return "/shops";
-    // any other owner child (e.g., /settings, /categories, /orders) → step back
+    
+    // All owner child pages → use browser history (respects navigation flow)
+    // This means: analytics → shop, inventory-history → analytics, team-performance → analytics
     return -1;
   }
 
@@ -184,7 +199,32 @@ function useAutoJoinAndResume() {
     const startParamFromQuery = usp.get("tgWebAppStartParam") || undefined;
     const startParam = (startParamFromInit || startParamFromQuery || "").trim();
 
+    // Handle join codes
     const code = startParam.startsWith("join_") ? startParam.slice("join_".length).trim() : "";
+    
+    // Handle product deep links with context
+    // Format: shop_SLUG_product_PRODUCTID or universal_product_PRODUCTID
+    let productId = "";
+    let productShopSlug: string | null = null;
+    let productContext: "shop" | "universal" = "universal";
+    
+    if (startParam.startsWith("shop_") && startParam.includes("_product_")) {
+      // shop_SLUG_product_PRODUCTID
+      const parts = startParam.split("_product_");
+      if (parts.length === 2) {
+        productShopSlug = parts[0].slice("shop_".length).trim();
+        productId = parts[1].trim();
+        productContext = "shop";
+      }
+    } else if (startParam.startsWith("universal_product_")) {
+      // universal_product_PRODUCTID
+      productId = startParam.slice("universal_product_".length).trim();
+      productContext = "universal";
+    } else if (startParam.startsWith("product_")) {
+      // Legacy format: product_PRODUCTID (default to universal)
+      productId = startParam.slice("product_".length).trim();
+      productContext = "universal";
+    }
 
     const handledKey = code ? `tgshop:join-handled:${code}` : "tgshop:join-handled";
     const resumeOnceKey = "tgshop:resume-once";
@@ -227,6 +267,19 @@ function useAutoJoinAndResume() {
       } catch {}
     }
 
+    // Handle product deep link
+    if (productId) {
+      // Navigate to product detail with correct context
+      if (productContext === "shop" && productShopSlug) {
+        // Shop context - always go to buyer view (even for shop staff)
+        nav(`/s/${productShopSlug}/p/${productId}`, { replace: true });
+      } else {
+        // Universal context
+        nav(`/universal/p/${productId}`, { replace: true });
+      }
+      return;
+    }
+
     if (!code) {
       tryResumePolitely();
       return;
@@ -236,7 +289,7 @@ function useAutoJoinAndResume() {
 
     (async () => {
       try {
-                const res = await api<any>("/invites/accept", {
+        const res = await api<any>("/invites/accept", {
           method: "POST",
           body: JSON.stringify({ code }),
         });
@@ -246,15 +299,14 @@ function useAutoJoinAndResume() {
         if (slug) {
           sessionStorage.setItem(handledKey, "1"); // only after success
 
-          // OWNER / ADMIN → owner view, others → buyer view
-          const target =
-            role === "OWNER" || role === "ADMIN"
-              ? `/shop/${slug}`
-              : `/s/${slug}`;
+          // OWNER, COLLABORATOR, HELPER → owner view
+          // MEMBER (new members) → buyer view
+          const isStaffRole = ["OWNER", "COLLABORATOR", "HELPER"].includes(role);
+          const target = isStaffRole ? `/shop/${slug}` : `/s/${slug}`;
 
           // Seed list memory correctly
           try {
-            if (role === "OWNER" || role === "ADMIN") {
+            if (isStaffRole) {
               localStorage.setItem("tgshop:lastOwnerShopPage", target);
               localStorage.setItem("tgshop:lastOwnerShopPageAt", String(Date.now()));
             } else {
@@ -521,14 +573,17 @@ export default function App() {
       <button
         onClick={() => window.dispatchEvent(new CustomEvent("tgshop:add-product"))}
         style={{
-          background: "#000",
+          background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
           color: "#fff",
-          border: "1px solid #000",
-          borderRadius: 12,
-          padding: "6px 10px",
-          fontSize: 12,
-          lineHeight: "14px",
+          border: "none",
+          borderRadius: 10,
+          padding: "8px 12px",
+          fontSize: 13,
+          fontWeight: 600,
+          lineHeight: 1.2,
           cursor: "pointer",
+          boxShadow: "0 2px 8px rgba(102, 126, 234, 0.3)",
+          minWidth: 60,
         }}
       >
         Add<br />Product
@@ -614,15 +669,19 @@ export default function App() {
             <Route path="/shop/:slug/settings" element={<ShopSettings />} />
             <Route path="/shop/:slug/categories" element={<ShopCategories />} />
             <Route path="/shop/:slug/invitations" element={<ShopInvitations />} />
+            <Route path="/shop/:slug/team/:userId" element={<ShopMemberDetail />} />
             <Route path="/shop/:slug/orders" element={<ShopOrders />} />
             <Route path="/shop/:slug/orders/:orderId" element={<ShopOrderDetail />} />
             <Route path="/shop/:slug/analytics" element={<ShopAnalytics />} />
             <Route path="/shop/:slug/analytics/top-products" element={<ShopTopProducts />} />
+            <Route path="/shop/:slug/inventory-history" element={<InventoryHistory />} />
+            <Route path="/shop/:slug/team-performance" element={<TeamPerformance />} />
 
             <Route path="/cart" element={<Cart />} />
             <Route path="/categories" element={<Categories />} />
             <Route path="/products" element={<Products />} />
             <Route path="/profile" element={<Profile />} />
+            <Route path="/settings" element={<Settings />} />
             <Route path="/joined" element={<JoinedShops />} />
             <Route path="/orders" element={<Orders />} /> 
 
@@ -636,9 +695,18 @@ export default function App() {
             {/* legacy/global */}
             <Route path="/s/:slug/cart" element={<Cart />} /> {/* buyer-scoped */}
             <Route path="/s/:slug/checkout" element={<Checkout />} />
-            {/* If you still use OrderDetail: */}
-            {/* <Route path="/orders/:id" element={<OrderDetail />} /> */}
-
+            
+            {/* Platform Admin Routes */}
+            <Route path="/admin" element={<PlatformAdmin />} />
+            <Route path="/admin/shops" element={<AdminShops />} />
+            <Route path="/admin/shops/:slug" element={<AdminShopDetail />} />
+            <Route path="/admin/users" element={<AdminUsers />} />
+            <Route path="/admin/users/:tgId" element={<AdminUserDetail />} />
+            <Route path="/admin/products" element={<AdminProducts />} />
+            <Route path="/admin/settings" element={<AdminSettings />} />
+            <Route path="/admin/reports" element={<AdminReports />} />
+            <Route path="/admin/universal" element={<AdminUniversal />} />
+            <Route path="/admin/categories" element={<AdminCategories />} />
             
           </Routes>
         </ErrorBoundary>

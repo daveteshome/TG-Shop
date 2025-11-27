@@ -16,19 +16,39 @@ shopsRouter.get("/shops/list", async (req: any, res, next) => {
   try {
     const userId = req.userId!;
 
-    const owned = await db.membership.findMany({
-      where: { userId, role: "OWNER" },
+    // My Shops: OWNER, COLLABORATOR, HELPER (management access)
+    const myShopsMemberships = await db.membership.findMany({
+      where: { 
+        userId, 
+        role: { in: ["OWNER", "COLLABORATOR", "HELPER"] },
+        tenant: {
+          deletedAt: null  // Only show non-deleted shops
+        }
+      },
       include: { tenant: true },
     });
 
-    const joined = await db.membership.findMany({
-      where: { userId, role: { in: ["MEMBER", "HELPER", "COLLABORATOR"] } },
+    // Joined Shops: MEMBER only (read-only access)
+    const joinedMemberships = await db.membership.findMany({
+      where: { 
+        userId, 
+        role: "MEMBER",
+        tenant: {
+          deletedAt: null  // Only show non-deleted shops
+        }
+      },
       include: { tenant: true },
     });
 
-    // plain tenant objects
-    const myTenants = owned.map((m: any) => m.tenant);
-    const joinedTenants = joined.map((m: any) => m.tenant);
+    // tenant objects with role
+    const myTenants = myShopsMemberships.map((m: any) => ({
+      ...m.tenant,
+      userRole: m.role, // Include the user's role in this shop
+    }));
+    const joinedTenants = joinedMemberships.map((m: any) => ({
+      ...m.tenant,
+      userRole: m.role,
+    }));
 
     // build logoWebUrl for all tenants
     const logoIds = Array.from(
@@ -71,26 +91,6 @@ shopsRouter.get("/shops/list", async (req: any, res, next) => {
 
 
 // POST /api/tenants  { name }  → creates tenant and OWNER membership
-shopsRouter.post("/tenants", async (req: any, res, next) => {
-  try {
-    const userId = req.userId!;
-    const { name } = (req.body ?? {}) as { name: string };
-    if (!name || String(name).trim().length < 3) return res.status(400).json({ error: "name_too_short" });
-    const clean = String(name).trim();
-    const slugBase = clean.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
-    const slug = slugBase || `shop-${Math.random().toString(36).slice(2, 6)}`;
 
-    const exists = await db.tenant.findUnique({ where: { slug } });
-    const finalSlug = exists ? `${slug}-${Math.random().toString(36).slice(2, 4)}` : slug;
-
-    const tenant = await db.$transaction(async (tx) => {
-      const t = await tx.tenant.create({ data: { slug: finalSlug, name: clean } });
-      await tx.membership.create({ data: { tenantId: t.id, userId, role: 'OWNER' } });
-      return t;
-    });
-
-    res.json({ tenant });
-  } catch (e) { next(e); }
-});
 
 export default shopsRouter;

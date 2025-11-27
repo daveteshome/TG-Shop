@@ -9,7 +9,6 @@ import { useTranslation } from "react-i18next";
 import ShopCategoryFilterGridIdentical from "../components/shop/ShopCategoryFilterGridIdentical";
 import SearchBox from "../components/search/SearchBox";
 
-
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 
 /* ---------------- URL helpers ---------------- */
@@ -20,7 +19,11 @@ function ensureAbsolute(url: string): string {
 }
 function forceHttpsIfNeeded(url: string): string {
   if (!url) return url;
-  if (typeof window !== "undefined" && window.location.protocol === "https:" && url.startsWith("http://")) {
+  if (
+    typeof window !== "undefined" &&
+    window.location.protocol === "https:" &&
+    url.startsWith("http://")
+  ) {
     return url.replace(/^http:\/\//, "https://");
   }
   return url;
@@ -32,14 +35,14 @@ function normalizeUrl(url?: string | null): string | null {
 
 function absolutizeIfNeeded(u?: string | null): string | null {
   if (!u) return null;
-  if (/^https?:\/\//i.test(u)) return u;   // absolute (R2 / http)
+  if (/^https?:\/\//i.test(u)) return u; // absolute (R2 / http)
   if (u.startsWith("/")) return `${API_BASE}${u}`; // backend-relative
   return null;
 }
 
 function Thumb({
-  slug,               // kept for signature compatibility (unused now)
-  productId,         // kept for signature compatibility (unused now)
+  slug, // kept for signature compatibility (unused now)
+  productId, // kept for signature compatibility (unused now)
   photoUrl,
 }: {
   slug: string;
@@ -56,7 +59,7 @@ function Thumb({
         width: size,
         height: size,
         borderRadius: 10,
-        background: "#ddd",         // ✅ clean gray block
+        background: "#ddd", // ✅ clean gray block
         overflow: "hidden",
         display: "flex",
         alignItems: "center",
@@ -72,7 +75,7 @@ function Thumb({
           width={size}
           height={size}
           style={{ objectFit: "cover", width: "100%", height: "100%", display: "block" }}
-          onError={() => setBroken(true)}   // ✅ fallback to gray if it fails
+          onError={() => setBroken(true)} // ✅ fallback to gray if it fails
         />
       ) : null}
     </div>
@@ -109,17 +112,23 @@ type UiImage = UiImageNew | UiImageExisting;
 
 export default function Shop() {
   const { slug } = useParams<{ slug: string }>();
-  useEffect(() => {
-    if (!slug) return;
-    window.dispatchEvent(new CustomEvent("tgshop:search-config", {
-      detail: { scope: "owner", tenantSlug: slug, placeholder: "Search my shop…", basePath: `/s/${slug}/search` },
-    }));
-  }, [slug]);
-
-
   const loc = useLocation();
   const nav = useNavigate();
   const { t } = useTranslation();
+
+  useEffect(() => {
+    if (!slug) return;
+    window.dispatchEvent(
+      new CustomEvent("tgshop:search-config", {
+        detail: {
+          scope: "owner",
+          tenantSlug: slug,
+          placeholder: "Search my shop…",
+          basePath: `/s/${slug}/search`,
+        },
+      })
+    );
+  }, [slug]);
 
   const [products, setProducts] = useState<Product[]>([]);
 
@@ -134,10 +143,32 @@ export default function Shop() {
   const [createImages, setCreateImages] = useState<UiImageNew[]>([]);
   const createFileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // 🔹 brand + condition in create form
+  const [pBrand, setPBrand] = useState("");
+  const [pCondition, setPCondition] = useState<"" | "new" | "used" | "refurbished">("");
+
+  // 🔹 per-field errors for create form
+  const [createErrors, setCreateErrors] = useState<{
+    title?: string;
+    brand?: string;
+    condition?: string;
+    price?: string;
+    stock?: string;
+    images?: string;
+  }>({});
+
+  // 🔹 Refs for scrolling to first error
+  const titleRef = useRef<HTMLInputElement | null>(null);
+  const brandRef = useRef<HTMLInputElement | null>(null);
+  const conditionRef = useRef<HTMLSelectElement | null>(null);
+  const priceRef = useRef<HTMLInputElement | null>(null);
+  const stockRef = useRef<HTMLInputElement | null>(null);
+  const imagesSectionRef = useRef<HTMLDivElement | null>(null);
+
   // filter category
   const [categoryId, setCategoryId] = useState<string | null>(null);
 
-  // edit form
+  // edit form (legacy, not used for main editing anymore but kept)
   const [showEdit, setShowEdit] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editImages, setEditImages] = useState<UiImage[]>([]);
@@ -147,9 +178,53 @@ export default function Shop() {
   const [saveErr, setSaveErr] = useState<string | null>(null);
   const [formDirty, setFormDirty] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [tenant, setTenant] = useState<{ id: string; name: string; logoWebUrl?: string | null } | null>(null);
+  const [tenant, setTenant] = useState<{
+    id: string;
+    name: string;
+    logoWebUrl?: string | null;
+    shippingInfo?: string | null;
+    location?: string | null;
+    deliveryMode?: "pickup" | "delivery" | "both" | null;
+    paymentMethods?: "cod" | "prepay" | "both" | null;
+    bankAccounts?: Array<{ id: string; bank: string; accountName: string; accountNumber: string }>;
+  } | null>(null);
+  
+  const [tenantLoaded, setTenantLoaded] = useState(false);
 
   const initData = getInitDataRaw();
+
+  // Validation function for shop setup completeness
+  function isShopSetupComplete(tenant: typeof tenant): { complete: boolean; missing: string[] } {
+    if (!tenant) return { complete: false, missing: [] };
+    
+    const missing: string[] = [];
+    
+    // Check delivery setup
+    if (!tenant.deliveryMode) {
+      missing.push("delivery_mode");
+    } else {
+      // If delivery mode includes "delivery", must have regions
+      if ((tenant.deliveryMode === "delivery" || tenant.deliveryMode === "both") && !tenant.shippingInfo?.trim()) {
+        missing.push("delivery_regions");
+      }
+      // If delivery mode includes "pickup", must have addresses
+      if ((tenant.deliveryMode === "pickup" || tenant.deliveryMode === "both") && !tenant.location?.trim()) {
+        missing.push("pickup_addresses");
+      }
+    }
+    
+    // Check payment setup
+    if (!tenant.paymentMethods) {
+      missing.push("payment_methods");
+    } else {
+      // If payment includes prepay, must have bank accounts
+      if ((tenant.paymentMethods === "prepay" || tenant.paymentMethods === "both") && (!tenant.bankAccounts || tenant.bankAccounts.length === 0)) {
+        missing.push("bank_accounts");
+      }
+    }
+    
+    return { complete: missing.length === 0, missing };
+  }
 
   function markDirty() {
     setFormDirty(true);
@@ -167,6 +242,50 @@ export default function Shop() {
     }
   }
 
+  function scrollToFirstCreateError(errors: typeof createErrors) {
+    const order: (keyof typeof createErrors)[] = [
+      "title",
+      "brand",
+      "condition",
+      "price",
+      "stock",
+      "images",
+    ];
+
+    const firstKey = order.find((k) => errors[k]);
+    if (!firstKey) return;
+
+    let el: HTMLElement | null = null;
+
+    switch (firstKey) {
+      case "title":
+        el = titleRef.current;
+        break;
+      case "brand":
+        el = brandRef.current;
+        break;
+      case "condition":
+        el = conditionRef.current;
+        break;
+      case "price":
+        el = priceRef.current;
+        break;
+      case "stock":
+        el = stockRef.current;
+        break;
+      case "images":
+        el = imagesSectionRef.current;
+        break;
+    }
+
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      if ("focus" in el) {
+        (el as any).focus?.();
+      }
+    }
+  }
+
   // fetch products (honor categoryId)
   async function loadProducts(shopSlug: string, catId: string | null = null) {
     const qs = catId ? `?category=${encodeURIComponent(catId)}` : "";
@@ -177,14 +296,18 @@ export default function Shop() {
 
     if (res.tenant && res.tenant.id) {
       setTenant((prev) => ({
+        ...prev,
         id: res.tenant!.id,
         name: res.tenant!.name,
         logoWebUrl: prev?.logoWebUrl ?? null,
       }));
     } else {
       try {
-        const tnt = await api<{ id: string; name: string; logoWebUrl?: string | null }>(`/shop/${shopSlug}`);
+        const tnt = await api<{ id: string; name: string; logoWebUrl?: string | null }>(
+          `/shop/${shopSlug}`
+        );
         setTenant((prev) => ({
+          ...prev,
           id: tnt.id,
           name: tnt.name,
           logoWebUrl: prev?.logoWebUrl ?? tnt.logoWebUrl ?? null,
@@ -200,6 +323,22 @@ export default function Shop() {
         detail: { slug: shopSlug, name: nameForHeader },
       })
     );
+  }
+
+  async function handleDeleteProduct(productId: string) {
+    if (!slug) return;
+
+    const ok =
+      window.confirm(t("confirm_delete_product") || "Are you sure you want to delete this product?");
+    if (!ok) return;
+
+    try {
+      await api<{ ok: boolean }>(`/shop/${slug}/products/${productId}`, { method: "DELETE" });
+      setProducts((prev) => prev.filter((p) => p.id !== productId));
+    } catch (err) {
+      console.error("Failed to delete product", err);
+      alert(t("error_delete_product") || "Failed to delete product");
+    }
   }
 
   async function loadProductForEdit(shopSlug: string, productId: string) {
@@ -226,6 +365,55 @@ export default function Shop() {
     setFormDirty(false);
   }
 
+  // Load tenant data function
+  const loadTenantData = React.useCallback(async () => {
+    if (!slug) return;
+    setTenantLoaded(false);
+    try {
+      const tnt = await api<{ 
+        id: string; 
+        name: string; 
+        logoWebUrl?: string | null;
+        shippingInfo?: string | null;
+        location?: string | null;
+        deliveryMode?: "pickup" | "delivery" | "both" | null;
+        paymentMethods?: "cod" | "prepay" | "both" | null;
+        bankAccounts?: Array<{ id: string; bank: string; accountName: string; accountNumber: string }>;
+      }>(
+        `/shop/${slug}`
+      );
+
+      
+      setTenant({
+        id: tnt.id,
+        name: tnt.name,
+        logoWebUrl:
+          typeof tnt.logoWebUrl === "string" && tnt.logoWebUrl.length > 0
+            ? tnt.logoWebUrl
+            : null,
+        shippingInfo: tnt.shippingInfo ?? null,
+        location: tnt.location ?? null,
+        deliveryMode: tnt.deliveryMode ?? null,
+        paymentMethods: tnt.paymentMethods ?? null,
+        bankAccounts: Array.isArray(tnt.bankAccounts) ? tnt.bankAccounts : [],
+      });
+      
+      setTenantLoaded(true);
+
+      window.dispatchEvent(
+        new CustomEvent("tgshop:set-shop-context", {
+          detail: {
+            slug,
+            name: tnt.name,
+            ...(tnt.logoWebUrl ? { logoWebUrl: tnt.logoWebUrl } : {}),
+          },
+        })
+      );
+    } catch {
+      setTenantLoaded(true); // Mark as loaded even on error
+    }
+  }, [slug]);
+
   useEffect(() => {
     if (slug) {
       localStorage.setItem("tgshop:lastShopPage", `/shop/${slug}`);
@@ -247,34 +435,20 @@ export default function Shop() {
   }, []);
 
   useEffect(() => {
-    if (!slug) return;
-    (async () => {
-      try {
-        const tnt = await api<{ id: string; name: string; logoWebUrl?: string | null }>(`/shop/${slug}`);
-        setTenant((prev) => ({
-          ...prev,
-          id: tnt.id,
-          name: tnt.name,
-          logoWebUrl:
-            typeof tnt.logoWebUrl === "string" && tnt.logoWebUrl.length > 0
-              ? tnt.logoWebUrl
-              : prev?.logoWebUrl ?? null,
-        }));
+    loadTenantData();
+  }, [loadTenantData]);
 
-        window.dispatchEvent(
-          new CustomEvent("tgshop:set-shop-context", {
-            detail: {
-              slug,
-              name: tnt.name,
-              ...(tnt.logoWebUrl ? { logoWebUrl: tnt.logoWebUrl } : {}),
-            },
-          })
-        );
-      } catch {
-        /* ignore */
+  // Reload tenant data when returning to this page (e.g., from settings)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        loadTenantData();
       }
-    })();
-  }, [slug]);
+    };
+    
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [loadTenantData]);
 
   useEffect(() => {
     function onAddProduct() {
@@ -284,33 +458,88 @@ export default function Shop() {
         setEditingId(null);
         setSaveErr(null);
         setCreateImages([]);
+        setCreateErrors({});
+        setPBrand("");
+        setPCondition("");
       });
     }
+    
+    function onClosePanel(e: Event) {
+      // If add product panel is open, close it and prevent navigation
+      if (showCreate) {
+        guardLeave(() => {
+          setShowCreate(false);
+          setSaveErr(null);
+          setCreateErrors({});
+        });
+        e.preventDefault(); // Prevent default to signal panel was closed
+        return false;
+      }
+      // If edit panel is open, close it
+      if (showEdit) {
+        guardLeave(() => {
+          setShowEdit(false);
+          setEditingId(null);
+        });
+        e.preventDefault();
+        return false;
+      }
+    }
+    
     window.addEventListener("tgshop:add-product", onAddProduct);
-    return () => window.removeEventListener("tgshop:add-product", onAddProduct);
+    window.addEventListener("tgshop:close-panel", onClosePanel as EventListener);
+    return () => {
+      window.removeEventListener("tgshop:add-product", onAddProduct);
+      window.removeEventListener("tgshop:close-panel", onClosePanel as EventListener);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formDirty]);
+  }, [formDirty, showCreate, showEdit]);
 
   // =============== CREATE ===============
   async function handleCreateProduct() {
     if (!slug) return;
+
+    const errors: typeof createErrors = {};
+
     if (!pTitle.trim()) {
-      setSaveErr(t("err_title_required"));
-      return;
+      errors.title = t("err_title_required");
+    }
+
+    if (!pBrand.trim()) {
+      errors.brand = t("err_brand_required") || "Brand is required";
+    }
+
+    if (!pCondition) {
+      errors.condition = t("err_condition_required") || "Condition is required";
     }
 
     const priceNum = Number(pPrice);
     if (!pPrice.trim() || Number.isNaN(priceNum) || priceNum <= 0) {
-      setSaveErr(t("err_price_gt_zero"));
-      return;
+      errors.price = t("err_price_gt_zero");
     }
 
     const stockNum = Number(pStock);
-    if (!pStock.trim() || Number.isNaN(stockNum) || stockNum <= 0 || !Number.isInteger(stockNum)) {
-      setSaveErr(t("err_stock_integer_gt_zero"));
+    if (
+      !pStock.trim() ||
+      Number.isNaN(stockNum) ||
+      stockNum <= 0 ||
+      !Number.isInteger(stockNum)
+    ) {
+      errors.stock = t("err_stock_integer_gt_zero");
+    }
+
+    if (createImages.length === 0) {
+      errors.images = t("err_image_required") || "At least one image is required";
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setCreateErrors(errors);
+      scrollToFirstCreateError(errors);
       return;
     }
 
+    // no client-side validation errors
+    setCreateErrors({});
     setSaving(true);
     setSaveErr(null);
 
@@ -329,7 +558,7 @@ export default function Shop() {
         imageIds.push(json.imageId);
       }
 
-      await api(`/shop/${slug}/products`, {
+      const res = await api<{ product: { id: string } }>(`/shop/${slug}/products`, {
         method: "POST",
         body: JSON.stringify({
           title: pTitle.trim(),
@@ -339,10 +568,15 @@ export default function Shop() {
           categoryId: pCategory,
           stock: stockNum,
           imageIds,
+          brand: pBrand.trim(),
+          condition: pCondition,
         }),
       });
 
-      await loadProducts(slug, categoryId);
+      const newId = res.product?.id;
+      if (!newId) {
+        throw new Error("no_product_id_in_response");
+      }
 
       // reset
       setPTitle("");
@@ -352,16 +586,21 @@ export default function Shop() {
       setPCategory(null);
       setPStock("1");
       setCreateImages([]);
+      setPBrand("");
+      setPCondition("");
       setShowCreate(false);
       setFormDirty(false);
+
+      nav(`/shop/${slug}/p/${newId}`);
     } catch (e: any) {
+      console.error(e);
       setSaveErr(e?.message || t("err_create_product_failed"));
     } finally {
       setSaving(false);
     }
   }
 
-  // =============== UPDATE ===============
+  // =============== UPDATE (legacy panel) ===============
   async function handleUpdateProduct() {
     if (!slug || !editingId) return;
     if (!pTitle.trim()) {
@@ -376,7 +615,12 @@ export default function Shop() {
     }
 
     const stockNum = Number(pStock);
-    if (!pStock.trim() || Number.isNaN(stockNum) || stockNum <= 0 || !Number.isInteger(stockNum)) {
+    if (
+      !pStock.trim() ||
+      Number.isNaN(stockNum) ||
+      stockNum <= 0 ||
+      !Number.isInteger(stockNum)
+    ) {
       setSaveErr(t("err_stock_integer_gt_zero"));
       return;
     }
@@ -403,7 +647,8 @@ export default function Shop() {
       }
 
       const imageIds: string[] = [];
-      const imagesReplace: { type: "existing" | "new"; productImageId?: string; imageId?: string }[] = [];
+      const imagesReplace: { type: "existing" | "new"; productImageId?: string; imageId?: string }[] =
+        [];
 
       for (const img of editImages) {
         if (img.kind === "existing") {
@@ -472,6 +717,66 @@ export default function Shop() {
 
   return (
     <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* Shop configuration warning */}
+      {tenantLoaded && (() => {
+        const setupStatus = isShopSetupComplete(tenant);
+        if (setupStatus.complete) return null;
+        
+
+        return (
+          <div style={{
+            padding: "14px 16px",
+            background: "linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%)",
+            border: "2px solid #F59E0B",
+            borderRadius: 12,
+            fontSize: 14,
+            color: "#92400E",
+            lineHeight: 1.6,
+            boxShadow: "0 2px 8px rgba(245, 158, 11, 0.2)",
+          }}>
+            <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 15 }}>
+              ⚠️ {t('shop_setup_incomplete', 'Shop Setup Incomplete')}
+            </div>
+            <div style={{ marginBottom: 8 }}>
+              {t('shop_setup_required', 'To start selling, please complete your shop configuration:')}
+            </div>
+            <div style={{ marginLeft: 16, marginBottom: 10 }}>
+              {setupStatus.missing.includes("delivery_mode") && (
+                <div>• {t('setup_delivery_mode', 'Choose delivery method (pickup/delivery/both)')}</div>
+              )}
+              {setupStatus.missing.includes("delivery_regions") && (
+                <div>• {t('setup_delivery_regions', 'Select at least one delivery region')}</div>
+              )}
+              {setupStatus.missing.includes("pickup_addresses") && (
+                <div>• {t('setup_pickup_addresses', 'Add at least one pickup address')}</div>
+              )}
+              {setupStatus.missing.includes("payment_methods") && (
+                <div>• {t('setup_payment_methods', 'Choose payment method (COD/prepay/both)')}</div>
+              )}
+              {setupStatus.missing.includes("bank_accounts") && (
+                <div>• {t('setup_bank_accounts', 'Add at least one bank account for prepayment')}</div>
+              )}
+            </div>
+            <button
+              onClick={() => nav(`/shop/${slug}/settings`)}
+              style={{
+                background: "#F59E0B",
+                color: "#fff",
+                border: "none",
+                borderRadius: 8,
+                padding: "8px 16px",
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: "pointer",
+                boxShadow: "0 2px 4px rgba(0, 0, 0, 0.1)",
+              }}
+            >
+              {t('btn_go_to_settings', 'Go to Settings')} →
+            </button>
+          </div>
+        );
+      })()}
+
       {/* create panel */}
       {showCreate && (
         <div style={panel}>
@@ -479,30 +784,46 @@ export default function Shop() {
           {saveErr ? <div style={{ color: "crimson", fontSize: 13 }}>{saveErr}</div> : null}
 
           <input
+            ref={titleRef}
             value={pTitle}
             onChange={(e) => {
               setPTitle(e.target.value);
+              setCreateErrors((prev) => ({ ...prev, title: undefined }));
               markDirty();
             }}
             placeholder={t("ph_product_title")}
             style={input}
           />
+          {createErrors.title && (
+            <div style={{ color: "crimson", fontSize: 12, marginTop: 2 }}>
+              {createErrors.title}
+            </div>
+          )}
 
           <div style={{ display: "flex", gap: 8 }}>
-            <input
-              value={pPrice}
-              onChange={(e) => {
-                setPPrice(e.target.value);
-                markDirty();
-              }}
-              placeholder={t("ph_price")}
-              style={{ ...input, flex: 1 }}
-              type="number"
-              min={1}
-              step={1}
-              inputMode="numeric"
-              pattern="[0-9]*"
-            />
+            <div style={{ flex: 1 }}>
+              <input
+                ref={priceRef}
+                value={pPrice}
+                onChange={(e) => {
+                  setPPrice(e.target.value);
+                  setCreateErrors((prev) => ({ ...prev, price: undefined }));
+                  markDirty();
+                }}
+                placeholder={t("ph_price")}
+                style={{ ...input, width: "100%" }}
+                type="number"
+                min={1}
+                step={1}
+                inputMode="numeric"
+                pattern="[0-9]*"
+              />
+              {createErrors.price && (
+                <div style={{ color: "crimson", fontSize: 12, marginTop: 2 }}>
+                  {createErrors.price}
+                </div>
+              )}
+            </div>
             <select
               value={pCurrency}
               onChange={(e) => {
@@ -516,8 +837,78 @@ export default function Shop() {
             </select>
           </div>
 
+          {/* Brand + Condition */}
+          <div>
+            <label
+              style={{
+                fontSize: 13,
+                fontWeight: 500,
+                display: "block",
+                marginBottom: 4,
+              }}
+            >
+              {t("label_brand") || "Brand"}
+            </label>
+            <input
+              ref={brandRef}
+              value={pBrand}
+              onChange={(e) => {
+                setPBrand(e.target.value);
+                setCreateErrors((prev) => ({ ...prev, brand: undefined }));
+                markDirty();
+              }}
+              placeholder={t("ph_brand") || "Brand"}
+              style={input}
+            />
+            {createErrors.brand && (
+              <div style={{ color: "crimson", fontSize: 12, marginTop: 2 }}>
+                {createErrors.brand}
+              </div>
+            )}
+
+            <label
+              style={{
+                fontSize: 13,
+                fontWeight: 500,
+                display: "block",
+                marginTop: 8,
+                marginBottom: 4,
+              }}
+            >
+              {t("label_condition") || "Condition"}
+            </label>
+            <select
+              ref={conditionRef}
+              value={pCondition}
+              onChange={(e) => {
+                setPCondition(e.target.value as any);
+                setCreateErrors((prev) => ({ ...prev, condition: undefined }));
+                markDirty();
+              }}
+              style={input}
+            >
+              <option value="">{t("ph_condition_none") || "Select condition"}</option>
+              <option value="new">{t("condition_new") || "New"}</option>
+              <option value="used">{t("condition_used") || "Used"}</option>
+              <option value="refurbished">
+                {t("condition_refurbished") || "Refurbished"}
+              </option>
+            </select>
+            {createErrors.condition && (
+              <div style={{ color: "crimson", fontSize: 12, marginTop: 2 }}>
+                {createErrors.condition}
+              </div>
+            )}
+          </div>
+
           {/* Category (cascader, icons hidden in this context) */}
-          <CategoryCascader value={pCategory} onChange={(id) => { setPCategory(id); markDirty(); }} />
+          <CategoryCascader
+            value={pCategory}
+            onChange={(id) => {
+              setPCategory(id);
+              markDirty();
+            }}
+          />
 
           <textarea
             value={pDesc}
@@ -530,13 +921,17 @@ export default function Shop() {
           />
 
           <div>
-            <label style={{ fontSize: 13, fontWeight: 500, display: "block", marginBottom: 4 }}>
+            <label
+              style={{ fontSize: 13, fontWeight: 500, display: "block", marginBottom: 4 }}
+            >
               {t("label_stock_units")}
             </label>
             <input
+              ref={stockRef}
               value={pStock}
               onChange={(e) => {
                 setPStock(e.target.value);
+                setCreateErrors((prev) => ({ ...prev, stock: undefined }));
                 markDirty();
               }}
               type="number"
@@ -547,11 +942,18 @@ export default function Shop() {
               placeholder="1"
               style={input}
             />
+            {createErrors.stock && (
+              <div style={{ color: "crimson", fontSize: 12, marginTop: 2 }}>
+                {createErrors.stock}
+              </div>
+            )}
           </div>
 
           {/* images create */}
-          <div>
-            <label style={{ fontSize: 13, fontWeight: 500, display: "block", marginBottom: 4 }}>
+          <div ref={imagesSectionRef}>
+            <label
+              style={{ fontSize: 13, fontWeight: 500, display: "block", marginBottom: 4 }}
+            >
               {t("label_images")}
             </label>
 
@@ -573,6 +975,7 @@ export default function Shop() {
                     previewUrl: URL.createObjectURL(file),
                   })),
                 ]);
+                setCreateErrors((prev) => ({ ...prev, images: undefined }));
                 e.target.value = "";
               }}
               style={{ display: "none" }}
@@ -594,6 +997,12 @@ export default function Shop() {
                 : t("msg_many_images_selected", { count: createImages.length })}
             </div>
 
+            {createErrors.images && (
+              <div style={{ color: "crimson", fontSize: 12, marginTop: 2 }}>
+                {createErrors.images}
+              </div>
+            )}
+
             {createImages.length > 0 ? (
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
                 {createImages.map((img, index) => (
@@ -611,7 +1020,11 @@ export default function Shop() {
                     }}
                   >
                     <button
-                      onClick={() => setCreateImages((prev) => prev.filter((x) => x.tempId !== img.tempId))}
+                      onClick={() =>
+                        setCreateImages((prev) =>
+                          prev.filter((x) => x.tempId !== img.tempId)
+                        )
+                      }
                       style={thumbDeleteBtn}
                       aria-label={t("aria_remove_image")}
                     >
@@ -632,6 +1045,7 @@ export default function Shop() {
               guardLeave(() => {
                 setShowCreate(false);
                 setSaveErr(null);
+                setCreateErrors({});
               })
             }
             style={secondaryBtn}
@@ -693,12 +1107,9 @@ export default function Shop() {
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
+                    if (!slug) return;
                     guardLeave(() => {
-                      setShowCreate(false);
-                      setShowEdit(true);
-                      setEditingId(p.id);
-                      setSaveErr(null);
-                      loadProductForEdit(slug!, p.id);
+                      nav(`/shop/${slug}/p/${p.id}`);
                     });
                   }}
                   style={smallBtn}
@@ -706,230 +1117,6 @@ export default function Shop() {
                   {t("btn_edit")}
                 </button>
               </div>
-
-              {showEdit && editingId === p.id ? (
-                <div style={{ ...panel, marginTop: 6 }}>
-                  <strong style={{ fontSize: 14 }}>{t("title_edit_product")}</strong>
-                  {saveErr ? <div style={{ color: "crimson", fontSize: 13 }}>{saveErr}</div> : null}
-
-                  <input
-                    value={pTitle}
-                    onChange={(e) => {
-                      setPTitle(e.target.value);
-                      markDirty();
-                    }}
-                    placeholder={t("ph_product_title")}
-                    style={input}
-                  />
-
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <input
-                      value={pPrice}
-                      onChange={(e) => {
-                        setPPrice(e.target.value);
-                        markDirty();
-                      }}
-                      placeholder={t("ph_price")}
-                      style={{ ...input, flex: 1 }}
-                      type="number"
-                      min={1}
-                      step={1}
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                    />
-                    <select
-                      value={pCurrency}
-                      onChange={(e) => {
-                        setPCurrency(e.target.value);
-                        markDirty();
-                      }}
-                      style={{ ...input, flexBasis: 110 }}
-                    >
-                      <option value="ETB">ETB</option>
-                      <option value="USD">USD</option>
-                    </select>
-                  </div>
-
-                  {/* Category (cascader, icons hidden in this context) */}
-                  <CategoryCascader value={pCategory} onChange={(id) => { setPCategory(id); markDirty(); }} />
-
-                  <textarea
-                    value={pDesc}
-                    onChange={(e) => {
-                      setPDesc(e.target.value);
-                      markDirty();
-                    }}
-                    placeholder={t("ph_description_optional")}
-                    style={{ ...input, minHeight: 60 }}
-                  />
-
-                  <div>
-                    <label style={{ fontSize: 13, fontWeight: 500, display: "block", marginBottom: 4 }}>
-                      {t("label_stock")}
-                    </label>
-                    <input
-                      value={pStock}
-                      onChange={(e) => {
-                        setPStock(e.target.value);
-                        markDirty();
-                      }}
-                      type="number"
-                      min={1}
-                      step={1}
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      placeholder="1"
-                      style={input}
-                    />
-                  </div>
-
-                  {/* edit images */}
-                  <div>
-                    <label style={{ fontSize: 13, fontWeight: 500, display: "block", marginBottom: 4 }}>
-                      {t("label_images_existing_new")}
-                    </label>
-                    <input
-                      ref={editFileInputRef}
-                      type="file"
-                      accept="image/*"
-                      multiple
-                      onChange={(e) => {
-                        markDirty();
-                        const files = e.target.files ? Array.from(e.target.files) : [];
-                        if (!files.length) return;
-                        setEditImages((prev) => [
-                          ...prev,
-                          ...files.map<UiImage>((file) => ({
-                            kind: "new",
-                            tempId: Math.random().toString(36).slice(2),
-                            file,
-                            previewUrl: URL.createObjectURL(file),
-                          })),
-                        ]);
-                        e.target.value = "";
-                      }}
-                      style={{ display: "none" }}
-                    />
-
-                    <button type="button" onClick={() => editFileInputRef.current?.click()} style={secondaryBtn}>
-                      {t("btn_choose_images")}
-                    </button>
-
-                    <div style={{ fontSize: 12, opacity: 0.6, marginTop: 4 }}>
-                      {editImages.length === 0
-                        ? t("msg_no_images_selected")
-                        : editImages.length === 1
-                        ? t("msg_one_image_selected")
-                        : t("msg_many_images_selected", { count: editImages.length })}
-                    </div>
-
-                    {editImages.length > 0 ? (
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 8 }}>
-                        {editImages.map((img, index) => {
-                          const isCover = index === 0;
-                          const url = img.kind === "existing" ? img.url : (img as UiImageNew).previewUrl;
-                          return (
-                            <div
-                              key={img.kind === "existing" ? (img as UiImageExisting).productImageId : (img as UiImageNew).tempId}
-                              style={{
-                                width: 62,
-                                height: 62,
-                                borderRadius: 8,
-                                backgroundImage: url ? `url(${url})` : undefined,
-                                backgroundSize: "cover",
-                                backgroundPosition: "center",
-                                position: "relative",
-                                border: isCover ? "2px solid #000" : "1px solid rgba(0,0,0,.1)",
-                              }}
-                            >
-                              <button
-                                onClick={() => {
-                                  markDirty();
-                                  setEditImages((prev) =>
-                                    prev.filter((x) =>
-                                      x.kind === "existing"
-                                        ? (x as UiImageExisting).productImageId !== (img as UiImageExisting).productImageId
-                                        : (x as UiImageNew).tempId !== (img as UiImageNew).tempId
-                                    )
-                                  );
-                                }}
-                                style={thumbDeleteBtn}
-                                aria-label={t("aria_remove_image")}
-                              >
-                                ×
-                              </button>
-                              {!isCover ? (
-                                <button
-                                  onClick={() => {
-                                    markDirty();
-                                    setEditImages((prev) => {
-                                      const copy = [...prev];
-                                      const i = copy.findIndex((x) =>
-                                        x.kind === "existing"
-                                          ? (x as UiImageExisting).productImageId === (img as UiImageExisting).productImageId
-                                          : (x as UiImageNew).tempId === (img as UiImageNew).tempId
-                                      );
-                                      if (i <= 0) return copy;
-                                      const [item] = copy.splice(i, 1);
-                                      copy.unshift(item);
-                                      return copy;
-                                    });
-                                  }}
-                                  style={thumbCoverBtn}
-                                >
-                                  ★
-                                </button>
-                              ) : (
-                                <div style={thumbCoverTag}>{t("tag_cover")}</div>
-                              )}
-                              <div style={thumbMoveRow}>
-                                <button
-                                  onClick={() => {
-                                    markDirty();
-                                    setEditImages((prev) => moveImage(prev, index, -1));
-                                  }}
-                                  style={thumbMoveBtn}
-                                  aria-label={t("aria_move_image_up")}
-                                >
-                                  ↑
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    markDirty();
-                                    setEditImages((prev) => moveImage(prev, index, +1));
-                                  }}
-                                  style={thumbMoveBtn}
-                                  aria-label={t("aria_move_image_down")}
-                                >
-                                  ↓
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button onClick={handleUpdateProduct} disabled={saving} style={primaryBtn}>
-                      {saving ? t("btn_saving") : t("btn_save_changes")}
-                    </button>
-                    <button
-                      onClick={() =>
-                        guardLeave(() => {
-                          setShowEdit(false);
-                          setEditingId(null);
-                          setSaveErr(null);
-                        })
-                      }
-                      style={secondaryBtn}
-                    >
-                      {t("btn_cancel")}
-                    </button>
-                  </div>
-                </div>
-              ) : null}
             </div>
           ))}
         </div>

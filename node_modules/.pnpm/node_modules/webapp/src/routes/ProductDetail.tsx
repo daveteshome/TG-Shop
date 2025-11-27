@@ -9,6 +9,7 @@ import { ProductCard } from "../components/product/ProductCard";
 import * as wish from "../lib/wishlist";
 import { addItem } from "../lib/api/cart";
 import { optimisticBumpCart, refreshCartCount } from "../lib/store";
+import ShopInfoDrawer from "../components/shop/ShopInfoDrawer";
 
 /* ---------- Helpers ---------- */
 function routedPath(loc: ReturnType<typeof useLocation>): string {
@@ -28,6 +29,12 @@ type Product = {
   stock?: number | null;
   categoryId?: string | null;
   photoUrl?: string | null;
+  compareAtPrice?: number | null;
+  category?: {
+    id: string;
+    title: string;
+    parentId?: string | null;
+  } | null;
   tenant?:
     | {
         id?: string;
@@ -35,6 +42,15 @@ type Product = {
         name?: string;
         publicPhone?: string | null;
         publicTelegramLink?: string | null;
+        logoWebUrl?: string | null;
+        description?: string | null;
+        instagramUrl?: string | null;
+        facebookUrl?: string | null;
+        twitterUrl?: string | null;
+        returnPolicy?: string | null;
+        shippingInfo?: string | null;
+        deliveryMode?: string | null;
+        location?: string | null;
       }
     | null;
   images?: Array<{ id?: string; webUrl?: string | null; url?: string | null }>;
@@ -44,16 +60,43 @@ type CategoryLite = {
   id: string;
   parentId?: string | null;
 };
+function normalizePhone(raw?: string | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  // Keep leading + and digits only
+  const cleaned = trimmed.replace(/[^0-9+]/g, "");
+  if (!cleaned) return null;
+
+  return cleaned;
+}
 
 function normalizeTelegramLink(raw?: string | null): string | null {
   if (!raw) return null;
   const trimmed = raw.trim();
   if (!trimmed) return null;
+
+  // 🛑 Guard against bad old values
+  const lower = trimmed.toLowerCase();
+  if (
+    lower === "undefined" ||
+    lower === "@undefined" ||
+    lower.endsWith("/undefined")
+  ) {
+    return null;
+  }
+
+  // Full URL already
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
+
+  // @username or bare username
   const username = trimmed.startsWith("@") ? trimmed.slice(1) : trimmed;
   if (!username) return null;
+
   return `https://t.me/${username}`;
 }
+
 
 /* ---------- Category helpers ---------- */
 function buildCategoryIndex(cats: CategoryLite[]) {
@@ -170,6 +213,10 @@ export default function ProductDetail() {
     () => isUniversal && id ? wish.has(id) : false
   );
   const [adding, setAdding] = useState(false);
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [categoryBreadcrumb, setCategoryBreadcrumb] = useState<Array<{id: string; title: string}>>([]);
+  const [showAllExplore, setShowAllExplore] = useState(false);
+  const [showShopInfo, setShowShopInfo] = useState(false);
 
   /* ---------- Load main product ---------- */
   useEffect(() => {
@@ -190,6 +237,48 @@ export default function ProductDetail() {
         setProduct(r.product);
         setImages(r.images || []);
         setIdx(0);
+
+        // Track product view for personalization
+        if (r.product) {
+          const { trackProductView } = await import('../lib/browsingHistory');
+          trackProductView({
+            id: r.product.id,
+            title: r.product.title,
+            categoryId: r.product.categoryId,
+          });
+        }
+
+        // Load category breadcrumb
+        if (r.product?.category) {
+          try {
+            const catEndpoint = mode === 'buyer' 
+              ? `/shop/${slug}/categories/with-counts`
+              : `/universal/categories/with-counts`;
+            const catRes: any = await api<any>(catEndpoint).catch(() => null);
+            const catArr = catRes == null ? [] : Array.isArray(catRes) ? catRes : Array.isArray(catRes.items) ? catRes.items : catRes.categories ?? [];
+            
+            const cats = catArr.map((c: any) => ({
+              id: String(c.id),
+              title: c.title || c.name,
+              parentId: c.parentId ?? null,
+            }));
+            
+            // Build breadcrumb from current category to root
+            const breadcrumb: Array<{id: string; title: string}> = [];
+            let currentCat = cats.find((c: any) => c.id === r.product.category?.id);
+            
+            while (currentCat) {
+              breadcrumb.unshift({ id: currentCat.id, title: currentCat.title });
+              currentCat = currentCat.parentId ? cats.find((c: any) => c.id === currentCat!.parentId) : null;
+            }
+            
+            setCategoryBreadcrumb(breadcrumb);
+          } catch (e) {
+            console.error('Failed to load category breadcrumb:', e);
+          }
+        } else {
+          setCategoryBreadcrumb([]);
+        }
 
         // reset lists when product changes
         setRelated([]);
@@ -272,7 +361,7 @@ export default function ProductDetail() {
           }));
 
           const prodRes: any = await api<any>(
-            "/universal/products?page=1&perPage=200"
+            "/universal/products?page=1&perPage=50"
           ).catch(() => ({}));
           const raw: any[] = prodRes?.items ?? [];
 
@@ -488,35 +577,70 @@ export default function ProductDetail() {
   /* ---------- Actions ---------- */
   const tg = getTelegramWebApp();
 
-  const callShop = () => {
+    const callShop = () => {
+    console.log("[ProductDetail] callShop clicked!", { product: product?.tenant });
     const phone = product?.tenant?.publicPhone;
-    if (!phone) return;
-    window.location.href = `tel:${phone}`;
-  };
-
-  const messageShop = () => {
-    if (!product?.tenant) return;
-
-    const direct = normalizeTelegramLink(product.tenant.publicTelegramLink);
-    const tgApp = getTelegramWebApp();
-
-    let link: string;
-    if (direct) {
-      // ✅ direct chat / channel / group link of the shop owner
-      link = direct;
-    } else if (product.tenant.id) {
-      // fallback → bot deep link with product + tenant
-      const BOT_USERNAME = import.meta.env.VITE_BOT_USERNAME as string;
-      link = `https://t.me/${BOT_USERNAME}?start=product_${product.id}_${product.tenant.id}`;
-    } else {
-      // last-resort → just open the bot
-      const BOT_USERNAME = import.meta.env.VITE_BOT_USERNAME as string;
-      link = `https://t.me/${BOT_USERNAME}`;
+    if (!phone) {
+      console.log("[ProductDetail] no publicPhone on tenant", product?.tenant);
+      alert("Shop phone number not available. Please ask the shop owner to add their phone number in settings.");
+      return;
     }
 
-    if (tgApp) tgApp.openTelegramLink(link);
-    else window.open(link, "_blank");
+    // Show phone number and copy to clipboard
+    const shopName = product?.tenant?.name || "Shop";
+    
+    // Try to copy to clipboard
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(phone).then(() => {
+        alert(`📞 ${shopName}\n\nPhone: ${phone}\n\n✓ Number copied to clipboard!\n\nYou can now paste it in your phone app to call.`);
+      }).catch(() => {
+        alert(`📞 ${shopName}\n\nPhone: ${phone}\n\nPlease copy this number to call the shop.`);
+      });
+    } else {
+      // Fallback for browsers without clipboard API
+      alert(`📞 ${shopName}\n\nPhone: ${phone}\n\nPlease copy this number to call the shop.`);
+    }
   };
+
+
+  const messageShop = () => {
+  if (!product?.tenant) {
+    console.log("[ProductDetail] no tenant on product", product);
+    return;
+  }
+
+  const raw = product.tenant.publicTelegramLink;
+  const direct = normalizeTelegramLink(raw);
+  const tgApp = getTelegramWebApp();
+
+  console.log("[ProductDetail] telegram debug", {
+    raw,
+    direct,
+    tenant: product.tenant,
+  });
+
+  let link: string | null = null;
+
+  if (direct) {
+    // ✅ direct chat / channel / group link of the shop owner
+    link = direct;
+  } else if (product.tenant.id) {
+    const BOT_USERNAME = import.meta.env.VITE_BOT_USERNAME as string | undefined;
+
+    if (BOT_USERNAME && BOT_USERNAME !== "undefined") {
+      link = `https://t.me/${BOT_USERNAME}?start=product_${product.id}_${product.tenant.id}`;
+    }
+  }
+
+  if (!link) {
+    alert("No valid Telegram contact is configured for this shop.");
+    return;
+  }
+
+  if (tgApp) tgApp.openTelegramLink(link);
+  else window.open(link, "_blank");
+};
+
 
   const toggleFavorite = () => {
     if (!product) return;
@@ -531,6 +655,105 @@ export default function ProductDetail() {
     setLiked(now);
   };
 
+  const shareProduct = async () => {
+    if (!product) return;
+    
+    try {
+      const BOT_USERNAME = import.meta.env.VITE_BOT_USERNAME as string | undefined;
+      
+      if (!BOT_USERNAME || BOT_USERNAME === 'undefined') {
+        console.warn('VITE_BOT_USERNAME not configured');
+        alert('Share feature not configured. Please contact support.');
+        return;
+      }
+      
+      // Create context-aware deep link
+      // If shared from shop (/s/slug), link back to shop buyer view
+      // If shared from universal, link back to universal
+      let deepLink: string;
+      if (mode === 'buyer' && slug) {
+        // Shop context - link to buyer view of the shop
+        deepLink = `https://t.me/${BOT_USERNAME}?startapp=shop_${slug}_product_${product.id}`;
+      } else {
+        // Universal context
+        deepLink = `https://t.me/${BOT_USERNAME}?startapp=universal_product_${product.id}`;
+      }
+      
+      // Build rich share text with description
+      const description = product.description 
+        ? (product.description.length > 100 
+            ? product.description.substring(0, 100) + '...' 
+            : product.description)
+        : '';
+      
+      const priceText = product.compareAtPrice && product.compareAtPrice > product.price
+        ? `💰 ${product.price} ${product.currency} (was ${product.compareAtPrice} ${product.currency})`
+        : `💰 ${product.price} ${product.currency}`;
+      
+      const shareText = [
+        `🛍️ ${product.title}`,
+        '',
+        priceText,
+        description ? `\n📝 ${description}` : '',
+        '',
+        `👉 ${deepLink}`,
+      ].filter(Boolean).join('\n');
+      
+      const tgApp = getTelegramWebApp();
+      
+      // Priority 1: Use Telegram's native share (most reliable in Telegram)
+      if (tgApp && typeof (tgApp as any).openTelegramLink === 'function') {
+        // Use Telegram share URL with rich text
+        const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(deepLink)}&text=${encodeURIComponent(shareText)}`;
+        (tgApp as any).openTelegramLink(shareUrl);
+        return;
+      }
+      
+      // Priority 2: Web Share API (works on mobile browsers)
+      if (navigator.share) {
+        try {
+          // Try to share with image if available
+          const shareData: any = { 
+            title: product.title,
+            text: shareText,
+          };
+          
+          // Try to include image (works on some platforms)
+          if (product.photoUrl) {
+            try {
+              const response = await fetch(product.photoUrl);
+              const blob = await response.blob();
+              const file = new File([blob], 'product.jpg', { type: blob.type });
+              shareData.files = [file];
+            } catch (e) {
+              // Image fetch failed, share without image
+              console.log('Could not fetch image for sharing:', e);
+            }
+          }
+          
+          await navigator.share(shareData);
+          return;
+        } catch (e) {
+          // User cancelled or not supported, fall through
+          console.log('Web share cancelled or failed:', e);
+        }
+      }
+      
+      // Priority 3: Copy to clipboard with rich text
+      try {
+        await navigator.clipboard.writeText(shareText);
+        alert('Product details copied to clipboard!');
+      } catch (e) {
+        // Clipboard failed, show the link
+        prompt('Copy this text:', shareText);
+      }
+      
+    } catch (e) {
+      console.error('Share failed:', e);
+      alert('Failed to share product');
+    }
+  };
+
   const addToCart = async () => {
     if (mode !== "buyer" || !id) return;
     try {
@@ -538,16 +761,7 @@ export default function ProductDetail() {
       await addItem(id, 1, { tenantSlug: slug });
       optimisticBumpCart(1);
       refreshCartCount(slug);
-      if (tg && typeof (tg as any).showPopup === "function") {
-        (tg as any).showPopup(
-          {
-            title: "Cart",
-            message: "Added to cart!",
-            buttons: [{ id: "ok", type: "default", text: "OK" }],
-          },
-          () => {}
-        );
-      }
+      // Silent success - cart icon updates automatically
     } catch (err) {
       if (tg && typeof (tg as any).showPopup === "function") {
         (tg as any).showPopup(
@@ -573,18 +787,7 @@ export default function ProductDetail() {
       await addItem(prod.id, 1, { tenantSlug: slug });
       optimisticBumpCart(1);
       refreshCartCount(slug);
-
-      const tg = getTelegramWebApp();
-      if (tg && typeof (tg as any).showPopup === "function") {
-        (tg as any).showPopup(
-          {
-            title: "Cart",
-            message: "Added to cart!",
-            buttons: [{ id: "ok", type: "default", text: "OK" }],
-          },
-          () => {}
-        );
-      }
+      // Silent success - cart icon updates automatically
     } catch (err) {
       console.error("Add related product to cart failed:", err);
     }
@@ -616,6 +819,7 @@ export default function ProductDetail() {
             <div style={{ width: "100%", background: "#fafafa", padding: 8 }}>
               <div style={{ position: "relative" }}>
                 <div
+                  onClick={() => setShowImageModal(true)}
                   style={{
                     width: "100%",
                     height: 260,
@@ -624,6 +828,7 @@ export default function ProductDetail() {
                     backgroundSize: "cover",
                     backgroundPosition: "center",
                     backgroundColor: "#eee",
+                    cursor: 'pointer',
                   }}
                 />
 
@@ -693,15 +898,164 @@ export default function ProductDetail() {
               )}
             </div>
 
+            {/* ---------- SHOP INFO CARD ---------- */}
+            {product.tenant && mode === 'buyer' && (
+              <div 
+                style={{
+                  margin: '12px 20px',
+                  padding: '12px',
+                  background: '#fff',
+                  borderRadius: 12,
+                  border: '1px solid #e5e7eb',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                }}
+              >
+                {product.tenant.logoWebUrl && (
+                  <div
+                    style={{
+                      width: 48,
+                      height: 48,
+                      borderRadius: 8,
+                      backgroundImage: `url(${product.tenant.logoWebUrl})`,
+                      backgroundSize: 'cover',
+                      backgroundPosition: 'center',
+                      backgroundColor: '#f3f4f6',
+                      flexShrink: 0,
+                    }}
+                  />
+                )}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: '#111' }}>
+                    {product.tenant.name}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>
+                    Shop
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowShopInfo(true)}
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: 13,
+                    fontWeight: 500,
+                    color: '#374151',
+                    background: '#f9fafb',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    flexShrink: 0,
+                  }}
+                >
+                  Shop Info
+                </button>
+              </div>
+            )}
+
+            {/* ---------- CATEGORY BREADCRUMB ---------- */}
+            {categoryBreadcrumb.length > 0 && (
+              <div style={{ padding: '0 20px', marginBottom: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  {categoryBreadcrumb.map((cat, idx) => (
+                    <React.Fragment key={cat.id}>
+                      {idx > 0 && <span style={{ color: '#9ca3af', fontSize: 12 }}>›</span>}
+                      <span
+                        onClick={() => {
+                          if (mode === 'buyer') {
+                            nav(`/s/${slug}?category=${cat.id}`);
+                          } else {
+                            nav(`/universal?category=${cat.id}`);
+                          }
+                        }}
+                        style={{
+                          fontSize: 12,
+                          color: idx === categoryBreadcrumb.length - 1 ? '#111' : '#6b7280',
+                          cursor: 'pointer',
+                          fontWeight: idx === categoryBreadcrumb.length - 1 ? 600 : 400,
+                        }}
+                      >
+                        {cat.title}
+                      </span>
+                    </React.Fragment>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* ---------- NAME & PRICE ---------- */}
             <div style={{ padding: "16px 20px" }}>
               <h2 style={{ fontSize: 18, margin: 0 }}>{product.title}</h2>
-              <div style={{ fontWeight: 600, fontSize: 16, marginTop: 6 }}>
-                {product.price} {product.currency}
+              
+              {/* Price with discount */}
+              <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <div style={{ fontWeight: 600, fontSize: 20, color: '#111' }}>
+                  {product.price} {product.currency}
+                </div>
+                
+                {product.compareAtPrice && product.compareAtPrice > product.price && (
+                  <>
+                    <div style={{ 
+                      fontSize: 16, 
+                      color: '#9ca3af', 
+                      textDecoration: 'line-through' 
+                    }}>
+                      {product.compareAtPrice} {product.currency}
+                    </div>
+                    <div style={{
+                      padding: '2px 8px',
+                      background: '#fee2e2',
+                      color: '#dc2626',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      borderRadius: 6,
+                    }}>
+                      {Math.round(((product.compareAtPrice - product.price) / product.compareAtPrice) * 100)}% OFF
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Stock status */}
+              <div style={{ marginTop: 8 }}>
+                {product.stock === 0 ? (
+                  <div style={{ 
+                    fontSize: 13, 
+                    color: '#dc2626', 
+                    fontWeight: 500,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}>
+                    <span>🔴</span> Out of Stock
+                  </div>
+                ) : product.stock && product.stock <= 5 ? (
+                  <div style={{ 
+                    fontSize: 13, 
+                    color: '#f59e0b', 
+                    fontWeight: 500,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}>
+                    <span>🟡</span> Only {product.stock} left in stock
+                  </div>
+                ) : (
+                  <div style={{ 
+                    fontSize: 13, 
+                    color: '#10b981', 
+                    fontWeight: 500,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}>
+                    <span>🟢</span> In Stock
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* ---------- ACTION ROW (☎, 💬, ♥ / 🛒) ---------- */}
+            {/* ---------- ACTION ROW (☎, 💬, 🔗, ♥ / 🛒) ---------- */}
             <div
               style={{
                 position: "sticky",
@@ -709,14 +1063,32 @@ export default function ProductDetail() {
                 zIndex: 10,
                 padding: "10px 16px",
                 background: "#fff",
+                borderBottom: '1px solid #f3f4f6',
               }}
             >
               <div style={actionRow}>
-                <button style={actionBtnBox} onClick={callShop}>
+                <button 
+                  style={{
+                    ...actionBtnBox,
+                    opacity: product?.tenant?.publicPhone ? 1 : 0.5,
+                  }} 
+                  onClick={callShop} 
+                  title={product?.tenant?.publicPhone ? `Call shop: ${product.tenant.publicPhone}` : "Phone number not available"}
+                >
                   ☎️
                 </button>
-                <button style={actionBtnBox} onClick={messageShop}>
+                <button 
+                  style={{
+                    ...actionBtnBox,
+                    opacity: product?.tenant?.publicTelegramLink ? 1 : 0.5,
+                  }}
+                  onClick={messageShop} 
+                  title={product?.tenant?.publicTelegramLink ? "Message shop on Telegram" : "Telegram link not available"}
+                >
                   💬
+                </button>
+                <button style={actionBtnBox} onClick={shareProduct} title="Share product">
+                  🔗
                 </button>
                 {mode === "universal" ? (
                   <button
@@ -740,11 +1112,11 @@ export default function ProductDetail() {
                   <button
                     style={{
                       ...actionBtnBox,
-                      opacity: adding ? 0.6 : 1,
+                      opacity: adding || product.stock === 0 ? 0.6 : 1,
                     }}
                     onClick={addToCart}
-                    disabled={adding}
-                    title="Add to cart"
+                    disabled={adding || product.stock === 0}
+                    title={product.stock === 0 ? "Out of stock" : "Add to cart"}
                   >
                     🛒
                   </button>
@@ -776,12 +1148,35 @@ export default function ProductDetail() {
             {/* ---------- RELATED (HORIZONTAL STRIP) ---------- */}
             {related.length > 0 && (
               <div style={{ padding: "8px 20px 24px" }}>
-                <h3 style={{ fontSize: 15, marginBottom: 12 }}>
-                  {t("label_related") ||
-                    (mode === "buyer"
-                      ? "Similar products"
-                      : "Similar items")}
-                </h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <h3 style={{ fontSize: 15, margin: 0 }}>
+                    {t("label_related") ||
+                      (mode === "buyer"
+                        ? "Similar products"
+                        : "Similar items")}
+                  </h3>
+                  {related.length > 6 && (
+                    <button
+                      onClick={() => {
+                        if (mode === 'buyer') {
+                          nav(`/s/${slug}?category=${product?.categoryId}`);
+                        } else {
+                          nav(`/universal?category=${product?.categoryId}`);
+                        }
+                      }}
+                      style={{
+                        fontSize: 13,
+                        color: '#168acd',
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        fontWeight: 500,
+                      }}
+                    >
+                      See All →
+                    </button>
+                  )}
+                </div>
 
                 {/* Outer scroll container */}
                 <div
@@ -801,6 +1196,11 @@ export default function ProductDetail() {
                     {related.map((p) => {
                       const img =
                         p.photoUrl || `/api/products/${p.id}/image`;
+                      
+                      const hasDiscount = p.compareAtPrice && p.compareAtPrice > p.price;
+                      const discountPercent = hasDiscount 
+                        ? Math.round(((p.compareAtPrice! - p.price) / p.compareAtPrice!) * 100)
+                        : 0;
 
                       return (
                         <div
@@ -828,8 +1228,27 @@ export default function ProductDetail() {
                             flex: "0 0 32%", // ~3 cards per viewport
                             minWidth: 120,
                             maxWidth: 160,
+                            position: 'relative',
                           }}
                         >
+                          {/* Discount badge */}
+                          {hasDiscount && (
+                            <div style={{
+                              position: 'absolute',
+                              top: 4,
+                              right: 4,
+                              background: '#dc2626',
+                              color: '#fff',
+                              padding: '2px 6px',
+                              borderRadius: 4,
+                              fontSize: 11,
+                              fontWeight: 600,
+                              zIndex: 1,
+                            }}>
+                              -{discountPercent}%
+                            </div>
+                          )}
+                          
                           <ProductCard
                             p={p as any}
                             mode={mode}
@@ -870,9 +1289,14 @@ export default function ProductDetail() {
                     gap: 4,
                   }}
                 >
-                  {exploreMore.map((p) => {
+                  {(showAllExplore ? exploreMore : exploreMore.slice(0, 15)).map((p) => {
                     const img =
                       p.photoUrl || `/api/products/${p.id}/image`;
+                    
+                    const hasDiscount = p.compareAtPrice && p.compareAtPrice > p.price;
+                    const discountPercent = hasDiscount 
+                      ? Math.round(((p.compareAtPrice! - p.price) / p.compareAtPrice!) * 100)
+                      : 0;
 
                     return (
                       <div
@@ -900,21 +1324,38 @@ export default function ProductDetail() {
                           padding: "12px 0",
                           borderBottom: "1px solid #eee",
                           cursor: "pointer",
+                          position: 'relative',
                         }}
                       >
-                        {/* Thumbnail */}
-                        <div
-                          style={{
-                            width: 75,
-                            height: 75,
-                            borderRadius: 12,
-                            backgroundImage: `url(${img})`,
-                            backgroundSize: "cover",
-                            backgroundPosition: "center",
-                            backgroundColor: "#eee",
-                            flexShrink: 0,
-                          }}
-                        />
+                        {/* Thumbnail with discount badge */}
+                        <div style={{ position: 'relative', flexShrink: 0 }}>
+                          <div
+                            style={{
+                              width: 75,
+                              height: 75,
+                              borderRadius: 12,
+                              backgroundImage: `url(${img})`,
+                              backgroundSize: "cover",
+                              backgroundPosition: "center",
+                              backgroundColor: "#eee",
+                            }}
+                          />
+                          {hasDiscount && (
+                            <div style={{
+                              position: 'absolute',
+                              top: 2,
+                              right: 2,
+                              background: '#dc2626',
+                              color: '#fff',
+                              padding: '2px 4px',
+                              borderRadius: 3,
+                              fontSize: 10,
+                              fontWeight: 600,
+                            }}>
+                              -{discountPercent}%
+                            </div>
+                          )}
+                        </div>
 
                         {/* Text */}
                         <div
@@ -926,7 +1367,7 @@ export default function ProductDetail() {
                         >
                           <div
                             style={{
-                              fontSize: 17,
+                              fontSize: 15,
                               fontWeight: 600,
                               whiteSpace: "nowrap",
                               overflow: "hidden",
@@ -937,11 +1378,35 @@ export default function ProductDetail() {
                             {p.title}
                           </div>
 
+                          {/* Shop name in universal mode */}
+                          {mode === 'universal' && p.tenant?.name && (
+                            <div style={{
+                              fontSize: 12,
+                              color: '#666',
+                              marginBottom: 2,
+                            }}>
+                              {p.tenant.name}
+                            </div>
+                          )}
+
+                          {/* Stock status */}
+                          {p.stock !== undefined && p.stock !== null && (
+                            <div style={{ fontSize: 11, marginBottom: 2 }}>
+                              {p.stock === 0 ? (
+                                <span style={{ color: '#dc2626' }}>Out of stock</span>
+                              ) : p.stock <= 5 ? (
+                                <span style={{ color: '#f59e0b' }}>Only {p.stock} left</span>
+                              ) : (
+                                <span style={{ color: '#10b981' }}>In stock</span>
+                              )}
+                            </div>
+                          )}
+
                           {p.description && (
                             <div
                               style={{
-                                fontSize: 13,
-                                color: "#777",
+                                fontSize: 12,
+                                color: "#999",
                                 whiteSpace: "nowrap",
                                 overflow: "hidden",
                                 textOverflow: "ellipsis",
@@ -960,10 +1425,21 @@ export default function ProductDetail() {
                             flexShrink: 0,
                           }}
                         >
+                          {hasDiscount && (
+                            <div style={{
+                              fontSize: 12,
+                              color: '#999',
+                              textDecoration: 'line-through',
+                              marginBottom: 2,
+                            }}>
+                              {p.compareAtPrice} {p.currency}
+                            </div>
+                          )}
                           <div
                             style={{
-                              fontSize: 17,
+                              fontSize: 16,
                               fontWeight: 700,
+                              color: hasDiscount ? '#dc2626' : '#000',
                             }}
                           >
                             {p.price} {p.currency}
@@ -973,11 +1449,146 @@ export default function ProductDetail() {
                     );
                   })}
                 </div>
+
+                {/* Load More button */}
+                {!showAllExplore && exploreMore.length > 15 && (
+                  <button
+                    onClick={() => setShowAllExplore(true)}
+                    style={{
+                      width: '100%',
+                      marginTop: 16,
+                      padding: '12px',
+                      background: '#f9fafb',
+                      border: '1px solid #e5e7eb',
+                      borderRadius: 8,
+                      fontSize: 14,
+                      fontWeight: 500,
+                      color: '#374151',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Load More ({exploreMore.length - 15} more items)
+                  </button>
+                )}
               </div>
             )}
           </>
         )}
       </div>
+
+      {/* ---------- SHOP INFO DRAWER ---------- */}
+      {product?.tenant && mode === 'buyer' && (
+        <ShopInfoDrawer
+          open={showShopInfo}
+          onClose={() => setShowShopInfo(false)}
+          shop={product.tenant}
+          onCall={product.tenant.publicPhone ? callShop : undefined}
+          onMessage={product.tenant.publicTelegramLink ? messageShop : undefined}
+        />
+      )}
+
+      {/* ---------- IMAGE ZOOM MODAL ---------- */}
+      {showImageModal && (
+        <div
+          onClick={() => setShowImageModal(false)}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.95)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+          }}
+        >
+          <button
+            onClick={() => setShowImageModal(false)}
+            style={{
+              position: 'absolute',
+              top: 16,
+              right: 16,
+              width: 36,
+              height: 36,
+              borderRadius: '50%',
+              background: 'rgba(255,255,255,0.2)',
+              border: 'none',
+              color: '#fff',
+              fontSize: 24,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            ×
+          </button>
+
+          <div style={{ position: 'relative', maxWidth: '100%', maxHeight: '100%' }}>
+            <img
+              src={imgUrl}
+              alt={product?.title}
+              style={{
+                maxWidth: '100%',
+                maxHeight: '90vh',
+                objectFit: 'contain',
+              }}
+              onClick={(e) => e.stopPropagation()}
+            />
+
+            {hasImages && images.length > 1 && (
+              <>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIdx((old) => (old - 1 + images.length) % images.length);
+                  }}
+                  style={{
+                    ...galleryBtnLeft,
+                    width: 40,
+                    height: 40,
+                    fontSize: 28,
+                  }}
+                >
+                  ‹
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIdx((old) => (old + 1) % images.length);
+                  }}
+                  style={{
+                    ...galleryBtnRight,
+                    width: 40,
+                    height: 40,
+                    fontSize: 28,
+                  }}
+                >
+                  ›
+                </button>
+                <div
+                  style={{
+                    position: 'absolute',
+                    bottom: 16,
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    background: 'rgba(0,0,0,0.6)',
+                    color: '#fff',
+                    padding: '4px 12px',
+                    borderRadius: 12,
+                    fontSize: 13,
+                  }}
+                >
+                  {idx + 1} / {images.length}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

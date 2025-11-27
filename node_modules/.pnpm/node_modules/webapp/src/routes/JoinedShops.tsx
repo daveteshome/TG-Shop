@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { api } from "../lib/api/index";
 import { TopBar } from "../components/layout/TopBar";
 
@@ -20,6 +21,7 @@ type ShopsPayload = {
 
 export default function JoinedShops() {
   const nav = useNavigate();
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [joined, setJoined] = useState<Tenant[]>([]);
   const [err, setErr] = useState<string | null>(null);
@@ -37,6 +39,9 @@ export default function JoinedShops() {
       });
 
   useEffect(() => {
+    // Scroll to top when component mounts
+    window.scrollTo(0, 0);
+    
     let mounted = true;
     (async () => {
       setLoading(true);
@@ -47,7 +52,7 @@ export default function JoinedShops() {
         setJoined(res.joinedShops || []);
       } catch (e: any) {
         if (!mounted) return;
-        setErr(e?.message || "Failed to load shops");
+        setErr(e?.message || t('failed_load_shops'));
       } finally {
         if (mounted) setLoading(false);
       }
@@ -65,8 +70,8 @@ export default function JoinedShops() {
           background: "var(--tg-theme-secondary-bg-color,#f5f5f7)",
         }}
       >
-        <TopBar title="Shops you joined" />
-        <div style={{ padding: "12px 16px" }}>Loading…</div>
+        <TopBar title={t('nav_joined')} />
+        <div style={{ padding: "12px 16px" }}>{t('loading')}</div>
       </div>
     );
   }
@@ -79,7 +84,7 @@ export default function JoinedShops() {
           background: "var(--tg-theme-secondary-bg-color,#f5f5f7)",
         }}
       >
-        <TopBar title="Shops you joined" />
+        <TopBar title={t('nav_joined')} />
         <div style={{ padding: "12px 16px", color: "crimson" }}>{err}</div>
       </div>
     );
@@ -116,7 +121,7 @@ export default function JoinedShops() {
     <div
       style={{
         minHeight: "100vh",
-        background: "var(--tg-theme-secondary-bg-color,#f5f5f7)",
+        background: "#f5f5f7",
       }}
     >
       <TopBar title="Shops you joined" />

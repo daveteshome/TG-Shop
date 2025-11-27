@@ -6,6 +6,7 @@ import { TopBar } from "../components/layout/TopBar";
 import { CategoryGrid } from "../components/categories/CategoryGrid";
 import type { Category as UiCategory } from "../components/categories/CategoryCard";
 import { api } from "../lib/api/index";
+import CategoryCascader from "../components/CategoryCascader";
 
 /** Backend shapes */
 type RawCategory = {
@@ -65,6 +66,48 @@ export default function ShopCategories() {
   const [activeId, setActiveId] = React.useState<string>("");
   const [savingTick, setSavingTick] = React.useState(0);
   const [parentOrder, setParentOrder] = React.useState<string[] | null>(null);
+  const [tenantId, setTenantId] = React.useState<string | null>(null);
+  
+  // Category request state
+  const [showRequestForm, setShowRequestForm] = React.useState(false);
+  const [requestName, setRequestName] = React.useState("");
+  const [requestDescription, setRequestDescription] = React.useState("");
+  const [requestIcon, setRequestIcon] = React.useState("");
+  const [requestParentId, setRequestParentId] = React.useState<string | null>(null);
+  const [submitting, setSubmitting] = React.useState(false);
+  
+  // User's requests
+  const [myRequests, setMyRequests] = React.useState<any[]>([]);
+  const [showMyRequests, setShowMyRequests] = React.useState(false);
+
+  // 0) Load tenant ID from slug and user's requests
+  React.useEffect(() => {
+    let mounted = true;
+    (async () => {
+      if (!slug) return;
+      try {
+        const shop = await api<{ id: string }>(`/shop/${slug}`);
+        if (!mounted) return;
+        setTenantId(shop.id);
+        
+        // Load user's category requests
+        try {
+          const requestsData = await api<{ requests: any[] }>(
+            `/category-requests/my-requests?tenantId=${shop.id}`
+          );
+          if (!mounted) return;
+          setMyRequests(requestsData.requests);
+        } catch (e) {
+          console.error("Failed to load requests:", e);
+        }
+      } catch (e: any) {
+        console.error("Failed to load shop:", e);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [slug]);
 
   // 1) Load canonical categories
   React.useEffect(() => {
@@ -245,9 +288,351 @@ export default function ShopCategories() {
     }
   }
 
+  // Submit category request
+  async function handleSubmitRequest() {
+    if (!requestName.trim()) {
+      alert("Category name is required");
+      return;
+    }
+
+    if (!tenantId) {
+      alert("Shop information not loaded yet");
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      await api("/category-requests", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: requestName.trim(),
+          description: requestDescription.trim() || null,
+          icon: requestIcon.trim() || null,
+          parentId: requestParentId,
+          tenantId: tenantId,
+        }),
+      });
+
+      // Reset form
+      setRequestName("");
+      setRequestDescription("");
+      setRequestIcon("");
+      setRequestParentId(null);
+      setShowRequestForm(false);
+      
+      // Reload requests
+      if (tenantId) {
+        try {
+          const requestsData = await api<{ requests: any[] }>(
+            `/category-requests/my-requests?tenantId=${tenantId}`
+          );
+          setMyRequests(requestsData.requests);
+        } catch (e) {
+          console.error("Failed to reload requests:", e);
+        }
+      }
+      
+      alert("Category request submitted! Admin will review it soon.");
+    } catch (e: any) {
+      alert(e?.message || "Failed to submit request");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
     <div style={{ padding: 12 }}>
       <TopBar title={t("title_categories")} />
+
+      {/* Request Category Button */}
+      {!showRequestForm && (
+        <div style={{ marginBottom: 12, display: "flex", gap: 8, alignItems: "center" }}>
+          <button
+            onClick={() => setShowRequestForm(true)}
+            style={{
+              padding: "8px 16px",
+              fontSize: 14,
+              fontWeight: 500,
+              border: "1px solid #2563eb",
+              borderRadius: 8,
+              background: "#2563eb",
+              color: "#fff",
+              cursor: "pointer",
+            }}
+          >
+            📝 Request New Category
+          </button>
+          
+          {myRequests.length > 0 && (
+            <button
+              onClick={() => setShowMyRequests(!showMyRequests)}
+              style={{
+                padding: "8px 16px",
+                fontSize: 14,
+                border: "1px solid #ddd",
+                borderRadius: 8,
+                background: "#fff",
+                cursor: "pointer",
+              }}
+            >
+              {showMyRequests ? "Hide" : "Show"} My Requests ({myRequests.length})
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Request Form */}
+      {showRequestForm && (
+        <div
+          style={{
+            marginBottom: 16,
+            padding: 12,
+            border: "1px solid #ddd",
+            borderRadius: 8,
+            background: "#f9f9f9",
+          }}
+        >
+          <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>
+            Request New Category
+          </h3>
+          
+          <input
+            value={requestName}
+            onChange={(e) => setRequestName(e.target.value)}
+            placeholder="Category name *"
+            style={{
+              width: "100%",
+              padding: "8px 12px",
+              marginBottom: 8,
+              border: "1px solid #ddd",
+              borderRadius: 6,
+              fontSize: 14,
+            }}
+          />
+          
+          <textarea
+            value={requestDescription}
+            onChange={(e) => setRequestDescription(e.target.value)}
+            placeholder="Description (optional)"
+            style={{
+              width: "100%",
+              padding: "8px 12px",
+              marginBottom: 8,
+              border: "1px solid #ddd",
+              borderRadius: 6,
+              fontSize: 14,
+              minHeight: 60,
+              resize: "vertical",
+            }}
+          />
+          
+          <input
+            value={requestIcon}
+            onChange={(e) => setRequestIcon(e.target.value)}
+            placeholder="Icon emoji (e.g., 🚗)"
+            style={{
+              width: "100%",
+              padding: "8px 12px",
+              marginBottom: 8,
+              border: "1px solid #ddd",
+              borderRadius: 6,
+              fontSize: 14,
+            }}
+          />
+          
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: 13, color: "#666", marginBottom: 4, display: "block" }}>
+              Parent Category (optional)
+            </label>
+            <CategoryCascader
+              value={requestParentId}
+              onChange={(id) => setRequestParentId(id)}
+              placeholder="Select parent category"
+            />
+          </div>
+          
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              onClick={handleSubmitRequest}
+              disabled={submitting}
+              style={{
+                padding: "8px 16px",
+                fontSize: 14,
+                fontWeight: 500,
+                border: "1px solid #2563eb",
+                borderRadius: 6,
+                background: "#2563eb",
+                color: "#fff",
+                cursor: submitting ? "not-allowed" : "pointer",
+                opacity: submitting ? 0.6 : 1,
+              }}
+            >
+              {submitting ? "Submitting..." : "Submit Request"}
+            </button>
+            <button
+              onClick={() => {
+                setRequestName("");
+                setRequestDescription("");
+                setRequestIcon("");
+                setRequestParentId(null);
+                setShowRequestForm(false);
+              }}
+              style={{
+                padding: "8px 16px",
+                fontSize: 14,
+                border: "1px solid #ddd",
+                borderRadius: 6,
+                background: "#fff",
+                cursor: "pointer",
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* My Requests Display */}
+      {showMyRequests && myRequests.length > 0 && (
+        <div style={{ marginBottom: 16, padding: 12, border: "1px solid #e0e0e0", borderRadius: 8, background: "#fff" }}>
+          <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>My Category Requests</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {myRequests.map((req) => {
+              const statusColor = 
+                req.status === "approved" ? "#4caf50" :
+                req.status === "rejected" ? "#f44336" :
+                "#ff9800";
+              
+              const statusLabel =
+                req.status === "approved" ? "✓ Approved" :
+                req.status === "rejected" ? "✕ Rejected" :
+                "⏳ Pending Review";
+              
+              return (
+                <div
+                  key={req.id}
+                  style={{
+                    padding: 12,
+                    border: `2px solid ${statusColor}20`,
+                    borderRadius: 8,
+                    background: `${statusColor}05`,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "start", gap: 10 }}>
+                    {req.icon && (
+                      <div style={{ fontSize: 24 }}>{req.icon}</div>
+                    )}
+                    <div style={{ flex: 1 }}>
+
+                      <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 4 }}>
+                        {req.name}
+                      </div>
+                      {req.description && (
+                        <div style={{ fontSize: 13, color: "#666", marginBottom: 6 }}>
+                          {req.description}
+                        </div>
+                      )}
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span
+                          style={{
+                            fontSize: 12,
+                            padding: "3px 10px",
+                            borderRadius: 12,
+                            background: statusColor,
+                            color: "#fff",
+                            fontWeight: 500,
+                          }}
+                        >
+                          {statusLabel}
+                        </span>
+                        <span style={{ fontSize: 11, color: "#999" }}>
+                          {new Date(req.createdAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                      
+                      {/* Show rejection note if rejected */}
+                      {req.status === "rejected" && req.rejectNote && (
+                        <div
+                          style={{
+                            marginTop: 8,
+                            padding: 10,
+                            background: "#fff3cd",
+                            borderRadius: 6,
+                            borderLeft: "3px solid #ff9800",
+                          }}
+                        >
+                          <div style={{ fontSize: 11, fontWeight: 600, color: "#856404", marginBottom: 4 }}>
+                            Admin's Note:
+                          </div>
+                          <div style={{ fontSize: 13, color: "#856404" }}>
+                            {req.rejectNote}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Show success message if approved */}
+                      {req.status === "approved" && (
+                        <div
+                          style={{
+                            marginTop: 8,
+                            padding: 10,
+                            background: "#d4edda",
+                            borderRadius: 6,
+                            borderLeft: "3px solid #4caf50",
+                          }}
+                        >
+                          <div style={{ fontSize: 13, color: "#155724" }}>
+                            ✓ Your category has been approved and is now available!
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* Delete button */}
+                    <button
+                      onClick={async () => {
+                        if (!confirm("Delete this request?")) return;
+                        try {
+                          await api(`/category-requests/${req.id}`, {
+                            method: "DELETE",
+                          });
+                          // Reload requests
+                          if (tenantId) {
+                            const requestsData = await api<{ requests: any[] }>(
+                              `/category-requests/my-requests?tenantId=${tenantId}`
+                            );
+                            setMyRequests(requestsData.requests);
+                          }
+                        } catch (e: any) {
+                          alert(e?.message || "Failed to delete request");
+                        }
+                      }}
+                      style={{
+                        width: 28,
+                        height: 28,
+                        borderRadius: "50%",
+                        border: "1px solid #ddd",
+                        background: "#fff",
+                        color: "#f44336",
+                        fontSize: 16,
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        flexShrink: 0,
+                      }}
+                      title="Delete request"
+                    >
+                      ×
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Tiny "Saved" toast (auto on successful save) */}
       <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>

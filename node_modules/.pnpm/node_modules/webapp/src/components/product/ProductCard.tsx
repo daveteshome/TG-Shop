@@ -8,11 +8,12 @@ export type Product = {
   id: string;
   title: string;
   description?: string | null;
-  price?: number | null;
+  price?: number | string | null;          // 👈 allow string from API
   currency?: string | null;
   photoUrl?: string | null;
   images?: { url?: string | null; webUrl?: string | null }[];
   tenant?: { name?: string | null } | null;
+  compareAtPrice?: number | string | null; // 👈 allow string from API
 };
 
 type Props = {
@@ -33,7 +34,7 @@ export function ProductCard({
   image,
   shopName,
   shopPhone,
-  shopTelegram, 
+  shopTelegram,
   onAdd,
   onMessage,
   onCall,
@@ -44,6 +45,31 @@ export function ProductCard({
     p.images?.[0]?.url ||
     p.photoUrl ||
     undefined;
+
+  // ---------- Discount logic (robust: handle string or number) ----------
+  const rawPrice = p.price;
+  const rawCompare = p.compareAtPrice;
+
+  const price =
+    rawPrice === null || rawPrice === undefined
+      ? null
+      : typeof rawPrice === "number"
+      ? rawPrice
+      : Number(rawPrice);
+
+  const compareAtPrice =
+    rawCompare === null || rawCompare === undefined
+      ? null
+      : typeof rawCompare === "number"
+      ? rawCompare
+      : Number(rawCompare);
+
+  const hasDiscount =
+    price !== null &&
+    compareAtPrice !== null &&
+    !Number.isNaN(price) &&
+    !Number.isNaN(compareAtPrice) &&
+    compareAtPrice > price;
 
   const [liked, setLiked] = useState(
     () => (mode === "universal" ? wish.has(p.id) : false)
@@ -66,7 +92,8 @@ export function ProductCard({
     const now = wish.toggle({
       id: p.id,
       title: p.title,
-      price: p.price ?? null,
+      // use numeric price if available, fallback to raw
+      price: price ?? (typeof rawPrice === "number" ? rawPrice : null),
       currency: p.currency ?? null,
       image: cover ?? null,
       tenantName: p.tenant?.name ?? shopName ?? null,
@@ -76,7 +103,13 @@ export function ProductCard({
 
   const onCart = async (e: React.MouseEvent | React.PointerEvent) => {
     stopAll(e);
-    if (onAdd) await onAdd(p);
+    if (onAdd) {
+      try {
+        await onAdd(p);
+      } catch (err) {
+        console.error("Cart add failed:", err);
+      }
+    }
   };
 
   const handleCall = (e: React.MouseEvent | React.PointerEvent) => {
@@ -98,28 +131,68 @@ export function ProductCard({
   return (
     <div
       style={{
-        border: "1px solid rgba(0,0,0,.08)",
-        borderRadius: 12,
+        border: "1px solid var(--color-border-light)",
+        borderRadius: "var(--radius-lg)",
         overflow: "hidden",
-        background: "#fff",
+        background: "var(--color-bg-primary)",
+        boxShadow: "var(--shadow-sm)",
+        transition: "all 0.2s ease",
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.boxShadow = "var(--shadow-md)";
+        e.currentTarget.style.transform = "translateY(-2px)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.boxShadow = "var(--shadow-sm)";
+        e.currentTarget.style.transform = "translateY(0)";
       }}
     >
-      {/* IMAGE + ♥ / 🛒 overlay (unchanged) */}
+      {/* IMAGE + ♥ / 🛒 overlay */}
       <div style={{ position: "relative" }}>
         <div
           style={{
             aspectRatio: "1 / 1",
-            background: "#eee",
+            background: "linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%)",
             backgroundImage: cover ? `url(${cover})` : undefined,
             backgroundSize: "cover",
             backgroundPosition: "center",
           }}
         />
+        
+        {/* Discount badge */}
+        {hasDiscount && (
+          <div
+            style={{
+              position: "absolute",
+              top: 8,
+              left: 8,
+              background: "var(--color-error)",
+              color: "#fff",
+              fontSize: "11px",
+              fontWeight: 600,
+              padding: "4px 8px",
+              borderRadius: "var(--radius-full)",
+              boxShadow: "var(--shadow-sm)",
+            }}
+          >
+            {Math.round(((compareAtPrice! - price!) / compareAtPrice!) * 100)}% OFF
+          </div>
+        )}
+
         {(showHeart || showCart) && (
           <button
             type="button"
-            onPointerDownCapture={stopAll}
-            onClick={showHeart ? onHeart : onCart}
+            onPointerDown={(e) => {
+              stopAll(e);
+            }}
+            onClick={(e) => {
+              stopAll(e);
+              if (showHeart) {
+                onHeart(e);
+              } else {
+                onCart(e);
+              }
+            }}
             aria-label={
               showHeart
                 ? liked
@@ -128,7 +201,11 @@ export function ProductCard({
                 : "Add to cart"
             }
             aria-pressed={showHeart ? liked : undefined}
-            style={overlayBtn}
+            style={{
+              ...overlayBtn,
+              background: "rgba(255,255,255,0.95)",
+              backdropFilter: "blur(8px)",
+            }}
           >
             {showHeart ? (liked ? <HeartSolid /> : <HeartOutline />) : <CartIcon />}
           </button>
@@ -136,9 +213,17 @@ export function ProductCard({
       </div>
 
       {/* TEXT + PRICE + CALL/MSG */}
-      <div style={{ padding: 10 }}>
+      <div style={{ padding: "12px" }}>
         {/* Name */}
-        <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.2 }}>
+        <div
+          style={{
+            fontSize: "14px",
+            fontWeight: 600,
+            lineHeight: 1.3,
+            color: "var(--color-text-primary)",
+            marginBottom: "4px",
+          }}
+        >
           {p.title}
         </div>
 
@@ -146,41 +231,57 @@ export function ProductCard({
         {p.description && (
           <div
             style={{
-              marginTop: 4,
-              fontSize: 12,
-              opacity: 0.75,
+              fontSize: "12px",
+              color: "var(--color-text-secondary)",
               display: "-webkit-box",
               WebkitLineClamp: 2,
               WebkitBoxOrient: "vertical" as any,
               overflow: "hidden",
+              lineHeight: 1.4,
+              marginBottom: "8px",
             }}
           >
             {p.description}
           </div>
         )}
 
-                {/* Price + call/msg icons */}
+        {/* Price + call/msg icons */}
         <div
           style={{
-            marginTop: 6,
+            marginTop: "8px",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            gap: 8,
+            gap: "8px",
           }}
         >
-          {/* Price */}
-          {p.price != null && p.currency && (
-            <div
-              style={{
-                fontSize: 13,
-                fontWeight: 600,
-                opacity: 0.9,
-              }}
-            >
-              {p.price} {p.currency}
-            </div>
-          )}
+          {/* Price (with discount support) */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+            {hasDiscount && p.currency && (
+              <div
+                style={{
+                  fontSize: "11px",
+                  textDecoration: "line-through",
+                  color: "var(--color-text-tertiary)",
+                  fontWeight: 500,
+                }}
+              >
+                {compareAtPrice} {p.currency}
+              </div>
+            )}
+
+            {price !== null && p.currency && !Number.isNaN(price) && (
+              <div
+                style={{
+                  fontSize: "15px",
+                  fontWeight: 700,
+                  color: "var(--color-primary)",
+                }}
+              >
+                {price} {p.currency}
+              </div>
+            )}
+          </div>
 
           {/* Call + Message icons (right side) */}
           {(onCall || shopPhone || onMessage) && (
@@ -188,7 +289,7 @@ export function ProductCard({
               style={{
                 display: "flex",
                 alignItems: "center",
-                gap: 6,
+                gap: "6px",
               }}
             >
               {(onCall || shopPhone) && (
@@ -216,26 +317,6 @@ export function ProductCard({
             </div>
           )}
         </div>
-
-        {/* 🔍 TEMP DEBUG: show phone + telegram so we see what comes from backend */}
-        {(shopPhone || shopTelegram) && (
-          <div
-            style={{
-              marginTop: 4,
-              fontSize: 11,
-              opacity: 0.6,
-              lineHeight: 1.3,
-            }}
-          >
-            {shopPhone && <div>Phone: {shopPhone}</div>}
-            {shopTelegram && <div>Telegram: {shopTelegram}</div>}
-          </div>
-        )}
-
-        {/* We removed visible shop name as you requested */}
-
-
-        {/* We removed visible shop name as you requested */}
       </div>
     </div>
   );
@@ -245,28 +326,31 @@ const overlayBtn: React.CSSProperties = {
   position: "absolute",
   top: 8,
   right: 8,
-  width: 30,
-  height: 30,
-  borderRadius: 999,
-  border: "1px solid rgba(0,0,0,.1)",
-  background: "rgba(255,255,255,.9)",
+  width: 32,
+  height: 32,
+  borderRadius: "var(--radius-full)",
+  border: "none",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
   cursor: "pointer",
   pointerEvents: "auto",
+  transition: "all 0.2s ease",
+  boxShadow: "var(--shadow-sm)",
 };
 
 const smallCircleBtn: React.CSSProperties = {
-  width: 28,
-  height: 28,
-  borderRadius: 999,
-  border: "1px solid rgba(0,0,0,.08)",
-  background: "#fff",
+  width: 32,
+  height: 32,
+  borderRadius: "var(--radius-full)",
+  border: "1px solid var(--color-border-main)",
+  background: "var(--color-bg-primary)",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
   cursor: "pointer",
+  transition: "all 0.2s ease",
+  color: "var(--color-text-secondary)",
 };
 
 function HeartOutline() {
@@ -276,12 +360,12 @@ function HeartOutline() {
       height="18"
       viewBox="0 0 24 24"
       fill="none"
-      style={{ color: "#131313ff" }}
+      style={{ color: "#6B7280" }}
     >
       <path
         d="M12.1 8.64l-.1.1-.1-.1C10.14 6.9 7.36 7 5.7 8.66c-1.66 1.66-1.76 4.44-.1 6.3l.1.1L12 21l6.4-5.9.1-.1c1.66-1.86 1.56-4.64-.1-6.3-1.66-1.66-4.44-1.76-6.3-.06z"
         stroke="currentColor"
-        strokeWidth="1.6"
+        strokeWidth="1.8"
         fill="none"
       />
     </svg>
@@ -290,7 +374,7 @@ function HeartOutline() {
 
 function HeartSolid() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="#e11d48">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="#EF4444">
       <path d="M12 21l-6.3-5.8c-2-2.2-2-5.6.1-7.6 2-2 5.2-2 7.2.1 2-2.1 5.2-2.1 7.2-.1 2.1 2 2.1 5.4.1 7.6L12 21z" />
     </svg>
   );

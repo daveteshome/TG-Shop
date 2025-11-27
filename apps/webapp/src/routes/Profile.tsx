@@ -99,6 +99,16 @@ export default function Profile() {
 
   async function save() {
     if (!form) return;
+
+    // Validate Ethiopian phone number if provided
+    if (form.phone && form.phone.trim() !== "+251") {
+      const phoneRegex = /^\+251\s?[79]\d{8}$/;
+      if (!phoneRegex.test(form.phone.trim())) {
+        alert("Please enter a valid Ethiopian phone number (e.g., +251 912 345 678)");
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       await updateProfile({
@@ -237,9 +247,16 @@ export default function Profile() {
           <FormField label="Phone">
             <input
               style={inputStyle}
-              value={form.phone || ""}
-              onChange={(e) => setForm({ ...form, phone: e.target.value })}
-              placeholder="Phone number"
+              value={form.phone || "+251 "}
+              onChange={(e) => {
+                let val = e.target.value;
+                // Ensure +251 prefix is always present
+                if (!val.startsWith("+251")) {
+                  val = "+251 " + val.replace(/^\+251\s?/, "");
+                }
+                setForm({ ...form, phone: val });
+              }}
+              placeholder="+251 912 345 678"
             />
           </FormField>
 

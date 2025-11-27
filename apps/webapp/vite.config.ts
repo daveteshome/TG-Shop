@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react';
 const allowedHosts = [
   'localhost',
   '127.0.0.1',
-  'unhandled-serenity-unsyllogistically.ngrok-free.dev',  //front
+  'semiconductor-work-capitol-bite.trycloudflare.com',
 ];
 
 export default defineConfig({

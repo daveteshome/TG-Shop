@@ -43,6 +43,7 @@ router.get("/search/suggest", async (req: any, res) => {
     where: {
       tenantIds,
       activeOnly: scope !== "owner",
+      approvedOnly: scope === "universal",
       categoryId,
     },
   });
@@ -63,7 +64,7 @@ router.get("/search", async (req: any, res) => {
   const q = String(req.query.q ?? "").trim();
   const scope = String(req.query.scope ?? "universal") as "universal" | "owner" | "buyer";
   const page = Math.max(1, Number(req.query.page ?? 1));
-  const perPage = Math.min(50, Math.max(1, Number(req.query.perPage ?? 20)));
+  const perPage = Math.min(100, Math.max(1, Number(req.query.perPage ?? 20)));
   const categoryId = req.query.categoryId ? String(req.query.categoryId) : null;
 
   const tenantSlug = req.query.tenantSlug ? String(req.query.tenantSlug) : null;
@@ -84,6 +85,7 @@ router.get("/search", async (req: any, res) => {
     where: {
       tenantIds,
       activeOnly: scope !== "owner",
+      approvedOnly: scope === "universal",
       categoryId,
     },
   });

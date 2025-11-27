@@ -7,6 +7,8 @@ const shopRouter = Router();
 // All endpoints here require Telegram auth
 shopRouter.use(telegramAuth);
 
+
+
 // inside backend/src/api/shops.ts
 // backend/src/api/shops.ts (or wherever you put it)
 shopRouter.get("/shops/:slug/orders", async (req: any, res, next) => {
@@ -73,11 +75,23 @@ shopRouter.get("/shops/list", async (req: any, res, next) => {
   try {
     const userId = req.userId!;
     const owned = await db.membership.findMany({
-      where: { userId, role: 'OWNER' },
+      where: { 
+        userId, 
+        role: 'OWNER',
+        tenant: {
+          deletedAt: null  // Only show non-deleted shops
+        }
+      },
       include: { tenant: true },
     });
     const joined = await db.membership.findMany({
-      where: { userId, role: { in: ['MEMBER','HELPER','COLLABORATOR'] } },
+      where: { 
+        userId, 
+        role: { in: ['MEMBER','HELPER','COLLABORATOR'] },
+        tenant: {
+          deletedAt: null  // Only show non-deleted shops
+        }
+      },
       include: { tenant: true },
     });
     res.json({
@@ -88,27 +102,6 @@ shopRouter.get("/shops/list", async (req: any, res, next) => {
   } catch (e) { next(e); }
 });
 
-// POST /api/tenants  { name }  → creates tenant and OWNER membership
-shopRouter.post("/tenants", async (req: any, res, next) => {
-  try {
-    const userId = req.userId!;
-    const { name } = (req.body ?? {}) as { name: string };
-    if (!name || String(name).trim().length < 3) return res.status(400).json({ error: "name_too_short" });
-    const clean = String(name).trim();
-    const slugBase = clean.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40);
-    const slug = slugBase || `shop-${Math.random().toString(36).slice(2, 6)}`;
 
-    const exists = await db.tenant.findUnique({ where: { slug } });
-    const finalSlug = exists ? `${slug}-${Math.random().toString(36).slice(2, 4)}` : slug;
-
-    const tenant = await db.$transaction(async (tx) => {
-      const t = await tx.tenant.create({ data: { slug: finalSlug, name: clean } });
-      await tx.membership.create({ data: { tenantId: t.id, userId, role: 'OWNER' } });
-      return t;
-    });
-
-    res.json({ tenant });
-  } catch (e) { next(e); }
-});
 
 export default shopRouter;

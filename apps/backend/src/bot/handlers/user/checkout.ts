@@ -256,9 +256,9 @@ export function registerCheckoutFlow(bot: any, adminIds: string[] = []) {
       let order;
       if (st.mode === 'buy_now') {
         if (!st.product) return ctx.reply('Product missing. Please try again.');
-        order = await OrdersService.createSingleItemPending(id, st.product, { shippingAddress });
+        order = await OrdersService.createSingleItemPending(id, st.product, { address: { line1: shippingAddress } });
       } else {
-        order = await OrdersService.checkoutFromCartWithDetails(id, { shippingAddress });
+        order = await OrdersService.checkoutFromCartWithDetails(id, { address: { line1: shippingAddress } });
       }
 
       try { await Publisher.notifyOrderNew(ctx.bot ?? ctx, order.id); } catch {}

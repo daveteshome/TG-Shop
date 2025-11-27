@@ -109,12 +109,49 @@ ownerOrdersRouter.get("/shop/:slug/orders/:id", resolveTenant, async (req: any, 
     // Again: this is owner view → filter by tenantId, not by userId
     const order = await db.order.findFirst({
       where: { id, tenantId },
-      include: { items: true },
+      include: { 
+        items: true,
+        user: {
+          select: {
+            name: true,
+            username: true,
+            phone: true,
+          }
+        }
+      },
     });
 
     if (!order) return res.status(404).json({ error: "not found" });
 
-    res.json(order);
+    // Build receipt webUrl if exists (following same pattern as logo)
+    let receiptWebUrl: string | null = null;
+    if (order.paymentProof && typeof order.paymentProof === 'object') {
+      const proof = order.paymentProof as any;
+      if (proof.receiptImageId) {
+        const img = await db.image.findUnique({
+          where: { id: proof.receiptImageId },
+          select: { mime: true },
+        });
+        
+        let ext: "jpg" | "png" | "webp" = "jpg";
+        const mime = img?.mime?.toLowerCase() || "";
+        if (mime.includes("png")) ext = "png";
+        else if (mime.includes("webp")) ext = "webp";
+        
+        const { publicImageUrl } = await import('../lib/r2');
+        receiptWebUrl = publicImageUrl(proof.receiptImageId, ext);
+      }
+    }
+
+    const transformedOrder = {
+      ...order,
+      paymentProof: order.paymentProof ? {
+        ...(order.paymentProof as any),
+        receiptWebUrl,
+      } : null,
+    };
+
+    res.json(transformedOrder);
   } catch (e: any) {
     console.error("[shop orders] get error", e);
     res.status(400).json({ error: e?.message || "shop_order_failed" });

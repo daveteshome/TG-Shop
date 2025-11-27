@@ -36,6 +36,9 @@ universalRouter.get("/universal/products/:id", async (req, res) => {
             name: true,
             publicPhone: true,
             publishUniversal: true,
+            publicTelegramLink: true,
+            logoImageId: true,
+            deletedAt: true,
           },
         },
         images: {
@@ -53,6 +56,44 @@ universalRouter.get("/universal/products/:id", async (req, res) => {
     });
 
     if (!product) return res.status(404).json({ error: "Product not found" });
+    
+    // Only show approved products in universal shop from non-deleted shops
+    if (!product.active || !product.publishToUniversal || product.reviewStatus !== 'approved' || product.tenant.deletedAt) {
+      return res.status(404).json({ error: "Product not found" });
+    }
+
+    // Track product view (fire-and-forget, don't block response)
+    db.productStats.upsert({
+      where: { productId: id },
+      create: {
+        productId: id,
+        tenantId: product.tenantId,
+        viewsTotal: 1,
+        revenueTotal: 0,
+      },
+      update: {
+        viewsTotal: { increment: 1 },
+      },
+    }).catch(err => console.error('Failed to track view:', err));
+
+    // Build tenant logo URL if exists
+    let logoWebUrl: string | null = null;
+    if (product.tenant?.logoImageId) {
+      const logoImg = await db.image.findUnique({
+        where: { id: product.tenant.logoImageId },
+        select: { mime: true },
+      });
+      const mime = logoImg?.mime?.toLowerCase() || "image/jpeg";
+      let ext: "jpg" | "png" | "webp" = "jpg";
+      if (mime.includes("png")) ext = "png";
+      else if (mime.includes("webp")) ext = "webp";
+      logoWebUrl = publicImageUrl(product.tenant.logoImageId, ext);
+    }
+
+    const tenant = product.tenant ? {
+      ...product.tenant,
+      logoWebUrl,
+    } : null;
 
     const images = (product.images ?? []).map((im: any) => ({
       id: im.id,
@@ -71,10 +112,11 @@ universalRouter.get("/universal/products/:id", async (req, res) => {
       title: product.title,
       description: product.description,
       price: product.price,
+      compareAtPrice: product.compareAtPrice ?? null,
       currency: product.currency,
       stock: product.stock,
-      tenantId: product.tenant?.id,
-      tenant: product.tenant,
+      tenantId: tenant?.id,
+      tenant: tenant,
       categoryId: product.categoryId ?? null,
       category: product.category
         ? {
@@ -100,44 +142,134 @@ universalRouter.get("/universal/products/:id", async (req, res) => {
   }
 });
 
+// Seeded random shuffle for deterministic but distributed product ordering
+function seededShuffle<T>(array: T[], seed: number): T[] {
+  const arr = [...array];
+  let currentSeed = seed;
+  
+  // Simple seeded random number generator
+  const random = () => {
+    currentSeed = (currentSeed * 9301 + 49297) % 233280;
+    return currentSeed / 233280;
+  };
+  
+  // Fisher-Yates shuffle with seeded random
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  
+  return arr;
+}
+
+// Distribute products evenly across shops
+function distributeProducts(products: any[]): any[] {
+  // Group products by shop
+  const byShop = new Map<string, any[]>();
+  for (const p of products) {
+    const shopId = p.tenantId || 'unknown';
+    if (!byShop.has(shopId)) {
+      byShop.set(shopId, []);
+    }
+    byShop.get(shopId)!.push(p);
+  }
+  
+  // Interleave products from different shops
+  const result: any[] = [];
+  const shopQueues = Array.from(byShop.values());
+  
+  while (shopQueues.some(q => q.length > 0)) {
+    for (const queue of shopQueues) {
+      if (queue.length > 0) {
+        result.push(queue.shift()!);
+      }
+    }
+  }
+  
+  return result;
+}
+
 universalRouter.get("/universal/products", async (req, res) => {
   const page = Math.max(1, Number(req.query.page ?? 1));
-  const perPage = Math.min(50, Math.max(1, Number(req.query.perPage ?? 24)));
+  const perPage = Math.min(100, Math.max(1, Number(req.query.perPage ?? 24)));
   const q = (req.query.q as string | undefined)?.trim() || undefined;
   const category = (req.query.category as string | undefined)?.trim() || undefined;
-
-  console.log("[universal] ← GET /products", { page, perPage, q, category, at: new Date().toISOString() });
+  const categories = (req.query.categories as string | undefined)?.trim() || undefined;
 
   try {
-    // ✅ REMOVE 'disabled: false' — it doesn't exist in your schema
+    // Support both single category and multiple categories
+    let categoryFilter: any = undefined;
+    if (categories) {
+      const catIds = categories.split(',').map(id => id.trim()).filter(Boolean);
+      if (catIds.length > 0) {
+        categoryFilter = { categoryId: { in: catIds } };
+      }
+    } else if (category) {
+      categoryFilter = { categoryId: category };
+    }
+
     const where: any = {
       active: true,
-      tenant: { publishUniversal: true },
+      tenant: { 
+        publishUniversal: true,
+        deletedAt: null  // Exclude products from deleted shops
+      },
       ...(q ? { title: { contains: q, mode: "insensitive" } } : {}),
-      ...(category ? { categoryId: category } : {}),
+      ...categoryFilter,
     };
 
-    console.time("[universal] prisma.count");
+    const requestId = Math.random().toString(36).substring(7);
+    console.time(`[universal:${requestId}] prisma.count`);
     const total = await db.product.count({ where });
-    console.timeEnd("[universal] prisma.count");
+    console.timeEnd(`[universal:${requestId}] prisma.count`);
 
-    console.time("[universal] prisma.findMany");
-    const products = await db.product.findMany({
+    // Fetch more products than needed for better distribution
+    const fetchSize = Math.min(total, perPage * 3);
+    
+    console.time(`[universal:${requestId}] prisma.findMany`);
+    const allProducts = await db.product.findMany({
       where,
-      orderBy: { createdAt: "desc" },
-      skip: (page - 1) * perPage,
-      take: perPage,
+      // No orderBy - we'll shuffle and distribute
+      take: fetchSize,
       include: {
-        tenant: { select: { id: true, slug: true, name: true, publicPhone: true, publishUniversal: true } },
+        tenant: {
+          select: {
+            id: true,
+            slug: true,
+            name: true,
+            publicPhone: true,
+            publishUniversal: true,
+            publicTelegramLink: true,
+          },
+        },
         images: {
-          select: { id: true, imageId: true, url: true, position: true, image: { select: { mime: true } } },
+          select: {
+            id: true,
+            imageId: true,
+            url: true,
+            position: true,
+            image: { select: { mime: true } },
+          },
           orderBy: { position: "asc" },
         },
-        // ✅ Category field is 'name' (mapped from DB 'title')
         category: { select: { id: true, name: true } },
       },
     });
-    console.timeEnd("[universal] prisma.findMany");
+    console.timeEnd(`[universal:${requestId}] prisma.findMany`);
+
+    // Create daily seed (changes once per day, consistent during the day)
+    const today = new Date();
+    const dailySeed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
+    
+    // Shuffle with daily seed for variety
+    const shuffled = seededShuffle(allProducts, dailySeed);
+    
+    // Distribute evenly across shops
+    const distributed = distributeProducts(shuffled);
+    
+    // Paginate the distributed results
+    const start = (page - 1) * perPage;
+    const products = distributed.slice(start, start + perPage);
 
     const items = products.map((p) => ({
       id: p.id,
@@ -149,6 +281,7 @@ universalRouter.get("/universal/products", async (req, res) => {
       tenantId: p.tenant?.id,
       tenant: p.tenant,
       categoryId: p.categoryId ?? null,
+      compareAtPrice: p.compareAtPrice ?? null,
       // normalize to {id,title} for the UI
       category: p.category ? { id: p.category.id, title: p.category.name } : null,
       images: (p.images ?? []).map((im: any) => ({
@@ -159,10 +292,8 @@ universalRouter.get("/universal/products", async (req, res) => {
       })),
     }));
 
-    console.log("[universal] → responding", { count: items.length, total });
     return res.json({ page, perPage, total, items });
   } catch (e: any) {
-    console.error("[universal] 💥 error:", e);
     return res.status(500).json({ page, perPage, total: 0, items: [], error: e?.message ?? String(e) });
   }
 });
@@ -241,16 +372,8 @@ universalRouter.get("/universal/categories/with-counts", async (_req, res) => {
 
     const items = Array.from(out.values());
 
-    console.log("[universal] /categories/with-counts →", {
-      nodes: nodes.length,
-      groups: counts.length,
-      items: items.length,
-      sample: items[0] ?? null,
-    });
-
     return res.json({ items });
   } catch (e: any) {
-    console.error("[universal] categories/with-counts error:", e);
     return res.status(500).json({ error: "UNIVERSAL_CATEGORIES_COUNTS_FAILED" });
   }
 });
@@ -284,6 +407,7 @@ universalRouter.get("/universal/category/:categoryId/products", async (req, res,
         publishToUniversal: true,
         tenant: {
           publishUniversal: true, // only from shops that are visible in universal
+          deletedAt: null  // Exclude products from deleted shops
         },
       },
       include: {
@@ -302,6 +426,7 @@ universalRouter.get("/universal/category/:categoryId/products", async (req, res,
             slug: true,
             name: true,
             publicPhone: true,
+            publicTelegramLink: true,
           },
         },
       },
@@ -341,6 +466,72 @@ universalRouter.get("/universal/category/:categoryId/products", async (req, res,
     res.json({ products });
   } catch (err) {
     next(err);
+  }
+});
+
+// POST /api/universal/products/by-ids - Get multiple products by IDs
+universalRouter.post("/universal/products/by-ids", async (req, res) => {
+  try {
+    const { ids } = req.body;
+    
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.json({ products: [] });
+    }
+
+    const products = await db.product.findMany({
+      where: {
+        id: { in: ids },
+        active: true,
+        tenant: { 
+          publishUniversal: true,
+          deletedAt: null  // Exclude products from deleted shops
+        },
+      },
+      include: {
+        tenant: {
+          select: {
+            id: true,
+            slug: true,
+            name: true,
+          },
+        },
+        images: {
+          select: {
+            id: true,
+            imageId: true,
+            url: true,
+            image: { select: { mime: true } },
+          },
+          orderBy: { position: "asc" },
+          take: 1,
+        },
+      },
+      take: 50, // Limit to prevent abuse
+    });
+
+    const mapped = products.map((p) => {
+      const firstImg = p.images[0];
+      let photoUrl: string | null = null;
+      if (firstImg) {
+        photoUrl = buildWebUrlFromImage(firstImg);
+      }
+
+      return {
+        id: p.id,
+        title: p.title,
+        description: p.description,
+        price: p.price,
+        currency: p.currency,
+        photoUrl,
+        categoryId: p.categoryId,
+        tenant: p.tenant,
+      };
+    });
+
+    res.json({ products: mapped });
+  } catch (e: any) {
+    console.error("Error fetching products by IDs:", e);
+    res.status(500).json({ error: e.message || "Failed to fetch products" });
   }
 });
 

@@ -64,8 +64,6 @@ export default function ShopCategoryFilterGridIdentical({
     (async () => {
       setLoading(true);
       try {
-        console.group("[ShopCategoryFilterGridIdentical] fetch");
-        console.log("config:", { slug, countsUrl, fetchMetaUrl });
 
         const [countRes, metaRes] = await Promise.all([
           api<{ items?: CategoryCountNode[] }>(countsUrl),
@@ -137,17 +135,42 @@ export default function ShopCategoryFilterGridIdentical({
 
   /* ---------- Build children map ---------- */
   const children = useMemo(() => {
+    // Build a lookup map for quick parent access
+    const byId = new Map<string, CategoryMeta & CategoryCountNode>();
+    merged.forEach(n => byId.set(n.id, n));
+    
+    // Collect all category IDs that should be shown
+    const shouldShow = new Set<string>();
+    
+    // Add all categories with products in descendants
+    merged.forEach((n) => {
+      if ((n.countWithDesc ?? 0) > 0) {
+        shouldShow.add(n.id);
+        
+        // Walk up and add all ancestors
+        let parentId = n.parentId;
+        while (parentId) {
+          shouldShow.add(parentId);
+          const parent = byId.get(parentId);
+          parentId = parent?.parentId || null;
+        }
+      }
+    });
+    
+    // Build the children map with only categories that should be shown
     const map = new Map<string | null, Array<CategoryMeta & CategoryCountNode>>();
     merged.forEach((n) => {
-      if ((n.countWithDesc ?? 0) <= 0) return;
+      if (!shouldShow.has(n.id)) return;
       const key: string | null = n.parentId ?? null;
       const list = map.get(key) || [];
       list.push(n);
       map.set(key, list);
     });
+    
     for (const [k, v] of map) v.sort((a, b) => a.name.localeCompare(b.name));
     console.log("[ShopCategoryFilterGridIdentical] children keys:", Array.from(map.keys()));
     console.log("[ShopCategoryFilterGridIdentical] root count:", (map.get(null) || []).length);
+    console.log("[ShopCategoryFilterGridIdentical] shouldShow size:", shouldShow.size);
     return map;
   }, [merged]);
 
@@ -214,9 +237,8 @@ children.keys: ${JSON.stringify(Array.from(children.keys()))}
 
   const parentUi = mapToUi(rootParents);
   const childCandidates = atChild ? (children.get(activeParentId!) || []) : [];
-  const childUi = atChild
-    ? mapToUi(childCandidates.filter((n) => (n.countDirect ?? 0) > 0))
-    : [];
+  // Show all children, not just those with direct products
+  const childUi = atChild ? mapToUi(childCandidates) : [];
 
   /* ---------- Handlers ---------- */
   const onPickParent = (id: string) => {
@@ -224,10 +246,9 @@ children.keys: ${JSON.stringify(Array.from(children.keys()))}
     lastCollectedIds.current = allIds;
     onChange(id, allIds);
 
-    const hasDirectChildrenWithProducts = (children.get(id) || []).some(
-      (n) => (n.countDirect ?? 0) > 0
-    );
-    if (hasDirectChildrenWithProducts) setStack(id);
+    // Check if this category has any children at all (regardless of direct products)
+    const hasChildren = (children.get(id) || []).length > 0;
+    if (hasChildren) setStack(id);
     else setStack(null);
   };
 
@@ -235,6 +256,15 @@ children.keys: ${JSON.stringify(Array.from(children.keys()))}
     const allIds = collectDescendantIds(id);
     lastCollectedIds.current = allIds;
     onChange(id, allIds);
+    
+    // Check if this child category also has children (for further drilling down)
+    const hasChildren = (children.get(id) || []).length > 0;
+    if (hasChildren) {
+      // Has children - drill down to show them
+      setStack(id);
+    }
+    // If no children, keep current stack (don't reset to null)
+    // This keeps the category selected and shows its products
   };
 
   const onBack = () => {
@@ -246,6 +276,13 @@ children.keys: ${JSON.stringify(Array.from(children.keys()))}
   /* ---------- Render ---------- */
   return (
     <div style={{ padding: "0 12px 6px 12px" }}>
+      {/* Debug info */}
+      {process.env.NODE_ENV === 'development' && (
+        <div style={{ fontSize: 10, color: '#999', marginBottom: 4 }}>
+          Stack: {stack || 'null'} | AtChild: {atChild ? 'yes' : 'no'} | Children: {childCandidates.length}
+        </div>
+      )}
+      
       {atChild && (
         <button
           type="button"

@@ -13,8 +13,8 @@ type RightDrawerProps = {
 export default function RightDrawer({
   open,
   onClose,
-  width = "56vw",
-  maxWidth = 270,
+  width = "66vw",
+  maxWidth = 300,
   children,
 }: RightDrawerProps) {
   useEffect(() => {
@@ -30,32 +30,38 @@ export default function RightDrawer({
 
   if (!open) return null;
 
-  // 🔑 Close on pointer/touch start, not on click, to avoid ghost taps
-  const handleBackdropPointerDown = (
-    e: React.MouseEvent<HTMLDivElement> | React.TouchEvent<HTMLDivElement>
-  ) => {
-    e.stopPropagation();
-    e.preventDefault();
-    onClose();
-  };
-
   return (
     <>
-      {/* Backdrop – eats the interaction BEFORE the browser fires a synthetic click */}
+      {/* Backdrop – closes drawer on click */}
       <div
-        onMouseDown={handleBackdropPointerDown}
-        onTouchStart={handleBackdropPointerDown}
+        onMouseDown={(e) => {
+          // Only close if clicking directly on backdrop, not on drawer
+          if (e.target === e.currentTarget) {
+            onClose();
+          }
+        }}
+        onClick={(e) => {
+          // Also handle click for touch devices
+          if (e.target === e.currentTarget) {
+            onClose();
+          }
+        }}
         style={{
           position: "fixed",
           inset: 0,
           background: "rgba(15, 23, 42, 0.35)",
           zIndex: 999,
           pointerEvents: "auto",
+          cursor: 'pointer',
         }}
       />
 
       {/* Right drawer */}
       <div
+        onMouseDown={(e) => {
+          // Prevent backdrop from receiving this event
+          e.stopPropagation();
+        }}
         onClick={(e) => {
           // keep clicks inside drawer from bubbling up
           e.stopPropagation();

@@ -11,6 +11,8 @@ import ShopCategoryFilterGridIdentical from "../components/shop/ShopCategoryFilt
 import { getTelegramWebApp } from "../lib/telegram";
 import { addItem } from "../lib/api/cart";
 import { optimisticBumpCart } from "../lib/store";
+import SmartSections from "../components/smart/SmartSections";
+import ShopInfoDrawer from "../components/shop/ShopInfoDrawer";
 
 /* ---------- Types ---------- */
 type TenantLite = {
@@ -19,7 +21,15 @@ type TenantLite = {
   name: string;
   publicPhone?: string | null;
   publicTelegramLink?: string | null;
-  logoWebUrl?: string | null; 
+  logoWebUrl?: string | null;
+  description?: string | null;
+  instagramUrl?: string | null;
+  facebookUrl?: string | null;
+  twitterUrl?: string | null;
+  returnPolicy?: string | null;
+  shippingInfo?: string | null;
+  deliveryMode?: string | null;
+  location?: string | null;
 };
 
 type CatalogResp = {
@@ -32,31 +42,66 @@ function normalizeTelegramLink(raw?: string | null): string | null {
   if (!raw) return null;
   const trimmed = raw.trim();
   if (!trimmed) return null;
+
+  // 🛑 Guard against bad old values
+  const lower = trimmed.toLowerCase();
+  if (
+    lower === "undefined" ||
+    lower === "@undefined" ||
+    lower.endsWith("/undefined")
+  ) {
+    return null;
+  }
+
+  // Full URL already
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
+
+  // @username or bare username
   const username = trimmed.startsWith("@") ? trimmed.slice(1) : trimmed;
   if (!username) return null;
+
   return `https://t.me/${username}`;
 }
 
+
 function openShopTelegram(opts: {
   ownerLink?: string | null;
+  productId?: string;
+  tenantId?: string | null;
   tg: ReturnType<typeof getTelegramWebApp> | null;
 }) {
-  const { ownerLink, tg } = opts;
+  const { ownerLink, productId, tenantId, tg } = opts;
 
-  const direct = normalizeTelegramLink(ownerLink);
+  const raw = ownerLink;
+  const direct = normalizeTelegramLink(raw);
 
-  if (!direct) {
-    alert("Shop has no Telegram contact link configured.");
+  let link: string | null = null;
+
+  if (direct) {
+    // ✅ direct owner / channel / group link
+    link = direct;
+  } else if (tenantId && productId) {
+    const BOT_USERNAME = import.meta.env.VITE_BOT_USERNAME as
+      | string
+      | undefined;
+
+    if (BOT_USERNAME && BOT_USERNAME !== "undefined") {
+      link = `https://t.me/${BOT_USERNAME}?start=product_${productId}_${tenantId}`;
+    }
+  }
+
+  if (!link) {
+    alert("No valid Telegram contact is configured for this shop.");
     return;
   }
 
   if (tg && typeof tg.openTelegramLink === "function") {
-    tg.openTelegramLink(direct);
+    tg.openTelegramLink(link);
   } else {
-    window.open(direct, "_blank");
+    window.open(link, "_blank");
   }
 }
+
 
 /* ---------- Component ---------- */
 export default function ShopBuyer() {
@@ -64,6 +109,10 @@ export default function ShopBuyer() {
   const nav = useNavigate();
 
   const loc = useLocation();
+  
+  const [showShopInfo, setShowShopInfo] = useState(false);
+
+  // Referrer is now stored directly by the calling component before navigation
 
   useEffect(() => {
     if (!slug) return;
@@ -84,10 +133,23 @@ export default function ShopBuyer() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [catalog, setCatalog] = useState<CatalogResp | null>(null);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
 
   const [q, setQ] = useState("");
   const [activeCatId, setActiveCatId] = useState<string | null>(null);
   const [activeCatIds, setActiveCatIds] = useState<Set<string>>(new Set());
+  const [shownInSmartSections, setShownInSmartSections] = useState<Set<string>>(new Set());
+
+  // Clear shown products when category is selected
+  useEffect(() => {
+    if (activeCatId) {
+      setShownInSmartSections(new Set());
+    }
+  }, [activeCatId]);
+
+
 
   /* ---------- Fetch shop data ---------- */
   useEffect(() => {
@@ -109,7 +171,15 @@ export default function ShopBuyer() {
               name: t.name,
               publicPhone: t.publicPhone ?? null,
               publicTelegramLink: t.publicTelegramLink ?? null,
-              logoWebUrl: t.logoWebUrl ?? null,   // 👈 ADD THIS
+              logoWebUrl: t.logoWebUrl ?? null,
+              description: t.description ?? null,
+              instagramUrl: t.instagramUrl ?? null,
+              facebookUrl: t.facebookUrl ?? null,
+              twitterUrl: t.twitterUrl ?? null,
+              returnPolicy: t.returnPolicy ?? null,
+              shippingInfo: t.shippingInfo ?? null,
+              deliveryMode: t.deliveryMode ?? null,
+              location: t.location ?? null,
             };
           }
         } catch {}
@@ -126,29 +196,23 @@ export default function ShopBuyer() {
         : (res?.categories ?? []);
     }
 
-    async function fetchProducts(s: string): Promise<UiProduct[]> {
-      const candidates = [
-        `/shop/${s}/products`,
-        `/catalog/${s}`,
-        `/shop/${s}/catalog`,
-        `/shops/${s}/catalog`,
-      ];
-      for (const url of candidates) {
-        try {
-          const res: any = await api<any>(url);
-          const raw: any[] = res?.products ?? res?.items ?? res?.data?.products ?? [];
-          return raw.map((p: any) => ({
-            ...p,
-            isActive:
-              typeof p?.isActive === "boolean"
-                ? p.isActive
-                : typeof p?.active === "boolean"
-                ? p.active
-                : true,
-          }));
-        } catch {}
+    async function fetchProducts(s: string, pageNum: number = 1): Promise<UiProduct[]> {
+      const url = `/shop/${s}/products?page=${pageNum}&perPage=100`;
+      try {
+        const res: any = await api<any>(url);
+        const raw: any[] = res?.products ?? res?.items ?? res?.data?.products ?? [];
+        return raw.map((p: any) => ({
+          ...p,
+          isActive:
+            typeof p?.isActive === "boolean"
+              ? p.isActive
+              : typeof p?.active === "boolean"
+              ? p.active
+              : true,
+        }));
+      } catch {
+        return [];
       }
-      return [];
     }
 
     (async () => {
@@ -163,7 +227,7 @@ export default function ShopBuyer() {
 
         const [cats, prods, tenantMaybe] = await Promise.all([
           fetchCategories(slug),
-          fetchProducts(slug),
+          fetchProducts(slug, 1),
           fetchTenant(slug),
         ]);
 
@@ -172,6 +236,8 @@ export default function ShopBuyer() {
 
         if (!cancelled) {
           setCatalog({ tenant, categories: cats, products: prods });
+          setHasMore(prods.length >= 100);
+          setPage(1);
           setLoading(false);
         }
       } catch (e) {
@@ -187,11 +253,70 @@ export default function ShopBuyer() {
     };
   }, [slug]);
 
+  /* ---------- Load more products ---------- */
+  const loadMore = async () => {
+    if (loadingMore || !hasMore || !slug) return;
+    
+    try {
+      setLoadingMore(true);
+      const nextPage = page + 1;
+      
+      const url = `/shop/${slug}/products?page=${nextPage}&perPage=100`;
+      const res: any = await api<any>(url);
+      const raw: any[] = res?.products ?? res?.items ?? res?.data?.products ?? [];
+      const newItems = raw.map((p: any) => ({
+        ...p,
+        isActive:
+          typeof p?.isActive === "boolean"
+            ? p.isActive
+            : typeof p?.active === "boolean"
+            ? p.active
+            : true,
+      }));
+      
+      setCatalog(prev => prev ? {
+        ...prev,
+        products: [...prev.products, ...newItems]
+      } : null);
+      setPage(nextPage);
+      setHasMore(newItems.length >= 100);
+    } catch (e) {
+      // Failed to load more products
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  /* ---------- Infinite scroll handler ---------- */
+  useEffect(() => {
+    const handleScroll = () => {
+      if (loadingMore || !hasMore) return;
+      
+      const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+      const scrollHeight = document.documentElement.scrollHeight;
+      const clientHeight = window.innerHeight;
+      
+      // Load more when user is 500px from bottom
+      if (scrollTop + clientHeight >= scrollHeight - 500) {
+        loadMore();
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, [loadingMore, hasMore, page, slug]);
+
   /* ---------- Derived values ---------- */
   const products = catalog?.products ?? [];
 
   const filtered = useMemo(() => {
     let list = products;
+
+    // Only filter out smart section products when no category is selected
+    // (when category is selected, smart sections are hidden anyway)
+    if (!activeCatId) {
+      list = list.filter((p: any) => !shownInSmartSections.has(p.id));
+    }
 
     if (activeCatIds.size > 0) {
       list = list.filter((p: any) => p.categoryId && activeCatIds.has(p.categoryId));
@@ -203,7 +328,7 @@ export default function ShopBuyer() {
     }
 
     return list;
-  }, [products, activeCatIds, q]);
+  }, [products, activeCatIds, activeCatId, q, shownInSmartSections]);
 
   /* ---------- Cart handler for overlay (buyer mode) ---------- */
   const handleAddToCart = async (prod: CardProduct): Promise<void> => {
@@ -212,10 +337,7 @@ export default function ShopBuyer() {
     optimisticBumpCart(1);                              // 2) instant UI
     window.dispatchEvent(new CustomEvent("tgshop:cart-updated", { detail: { tenantSlug: slug } })); // 3) background refresh
 
-    const tg = getTelegramWebApp();
-    if (tg && typeof (tg as any).showPopup === "function") {
-      (tg as any).showPopup({ title: "Cart", message: "Added to cart!", buttons: [{ id: "ok", type: "default", text: "OK" }] }, () => {});
-    }
+    // Silent success - no popup needed, cart icon updates automatically
   } catch (err) {
     console.error("Add to cart failed:", err);
   }
@@ -249,16 +371,34 @@ const tg = getTelegramWebApp();
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      {/* Header */}
-      {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      {/* Header - Clickable to show shop info */}
+      <div 
+        onClick={() => setShowShopInfo(true)}
+        style={{ 
+          display: "flex", 
+          alignItems: "center", 
+          gap: 10,
+          cursor: "pointer",
+          padding: "8px 12px",
+          borderRadius: 12,
+          background: "#fff",
+          border: "1px solid #eee",
+        }}
+      >
         <ShopAvatar name={shopName} url={shopLogo} />
-        <div style={{ fontWeight: 700, fontSize: 16 }}>{shopName}</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 700, fontSize: 16 }}>{shopName}</div>
+          {catalog.tenant.description && (
+            <div style={{ fontSize: 12, color: "#666", marginTop: 2 }}>
+              {catalog.tenant.description}
+            </div>
+          )}
+        </div>
+        <div style={{ fontSize: 18, color: "#999" }}>ℹ️</div>
       </div>
 
 
       {/* Unified category grid with recursive behavior */}
-
       <ShopCategoryFilterGridIdentical
         value={activeCatId}
         onChange={(id, allIds) => {
@@ -266,6 +406,41 @@ const tg = getTelegramWebApp();
           setActiveCatIds(allIds ?? new Set());
         }}
       />
+
+      {/* Smart personalized sections - only show when no category is selected */}
+      {!activeCatId ? (
+        <SmartSections 
+          mode="buyer" 
+          tenantSlug={slug}
+          onProductsShown={(ids) => setShownInSmartSections(new Set(ids))}
+          onAdd={handleAddToCart}
+          shopPhone={shopPhone}
+          shopTelegram={shopTelegram ?? undefined}
+          onCall={
+            shopPhone
+              ? () => {
+                  const shopName = catalog.tenant?.name || "Shop";
+                  // Copy to clipboard and show alert
+                  if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(shopPhone).then(() => {
+                      alert(`📞 ${shopName}\n\nPhone: ${shopPhone}\n\n✓ Number copied to clipboard!\n\nYou can now paste it in your phone app to call.`);
+                    }).catch(() => {
+                      alert(`📞 ${shopName}\n\nPhone: ${shopPhone}\n\nPlease copy this number to call the shop.`);
+                    });
+                  } else {
+                    alert(`📞 ${shopName}\n\nPhone: ${shopPhone}\n\nPlease copy this number to call the shop.`);
+                  }
+                }
+              : undefined
+          }
+          onMessage={() =>
+            openShopTelegram({
+              ownerLink: shopTelegram,
+              tg,
+            })
+          }
+        />
+      ) : null}
 
       {/* Product list */}
       <div style={grid}>
@@ -311,14 +486,16 @@ const tg = getTelegramWebApp();
   onCall={
   shopPhone
     ? () => {
-        const tg = getTelegramWebApp();
-
-        if (tg && typeof tg.openLink === "function") {
-          // ✅ Use Telegram bridge on mobile
-          tg.openLink(`tel:${shopPhone}`);
+        const shopName = catalog.tenant?.name || "Shop";
+        // Copy to clipboard and show alert
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(shopPhone).then(() => {
+            alert(`📞 ${shopName}\n\nPhone: ${shopPhone}\n\n✓ Number copied to clipboard!\n\nYou can now paste it in your phone app to call.`);
+          }).catch(() => {
+            alert(`📞 ${shopName}\n\nPhone: ${shopPhone}\n\nPlease copy this number to call the shop.`);
+          });
         } else {
-          // Fallback for normal browsers
-          window.location.href = `tel:${shopPhone}`;
+          alert(`📞 ${shopName}\n\nPhone: ${shopPhone}\n\nPlease copy this number to call the shop.`);
         }
       }
     : undefined
@@ -338,10 +515,47 @@ const tg = getTelegramWebApp();
           );
 
         })}
-        {filtered.length === 0 && (
-          <div style={{ opacity: 0.6 }}>No products match your search.</div>
+        {filtered.length === 0 && (q.trim() || activeCatId) && (
+          <div style={{ opacity: 0.6 }}>
+            {q.trim() ? 'No products match your search.' : 'No products in this category.'}
+          </div>
+        )}
+
+        {/* Loading more indicator */}
+        {loadingMore && (
+          <div style={{ textAlign: 'center', padding: '20px', opacity: 0.6 }}>
+            Loading more products...
+          </div>
+        )}
+
+        {/* End of results */}
+        {!hasMore && filtered.length > 0 && (
+          <div style={{ textAlign: 'center', padding: '20px', opacity: 0.5, fontSize: 14 }}>
+            You've seen all products
+          </div>
         )}
       </div>
+
+      {/* Shop Info Drawer */}
+      <ShopInfoDrawer
+        open={showShopInfo}
+        onClose={() => setShowShopInfo(false)}
+        shop={catalog.tenant}
+        onCall={shopPhone ? () => {
+          const shopName = catalog.tenant?.name || "Shop";
+          // Copy to clipboard and show alert
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(shopPhone).then(() => {
+              alert(`📞 ${shopName}\n\nPhone: ${shopPhone}\n\n✓ Number copied to clipboard!\n\nYou can now paste it in your phone app to call.`);
+            }).catch(() => {
+              alert(`📞 ${shopName}\n\nPhone: ${shopPhone}\n\nPlease copy this number to call the shop.`);
+            });
+          } else {
+            alert(`📞 ${shopName}\n\nPhone: ${shopPhone}\n\nPlease copy this number to call the shop.`);
+          }
+        } : undefined}
+        onMessage={shopTelegram ? () => openShopTelegram({ ownerLink: shopTelegram, productId: undefined, tenantId, tg }) : undefined}
+      />
     </div>
   );
 }
@@ -354,8 +568,7 @@ const grid: React.CSSProperties = {
 };
 
 
-function ShopAvatar({ name, url }: { name: string; url: string | null }) {
-  const size = 40;
+function ShopAvatar({ name, url, size = 40 }: { name: string; url: string | null; size?: number }) {
   const initial = (name || "S").slice(0, 1).toUpperCase();
 
   return (

@@ -41,6 +41,12 @@ import shopRouter from "./routes/shop";
 import shopsRouter from "./routes/shops";
 import { tenantRouter } from "./routes/tenants";
 import universalRouter from "./routes/universal";
+import { adminRouter } from './routes/admin';
+import { reportsRouter } from './routes/reports';
+import categoryRequestsRouter from './routes/category-requests';
+import { userOrdersRouter } from './routes/user.orders';
+import { teamRouter } from './routes/team';
+import { cleanupRouter } from './routes/cleanup';
 
 export function createApp() {
   const app = express();
@@ -55,13 +61,14 @@ export function createApp() {
   app.use(cors({
     origin: [
       ENV.WEBAPP_URL,
-      'https://unhandled-serenity-unsyllogistically.ngrok-free.dev', //front
+      'https://semiconductor-work-capitol-bite.trycloudflare.com',
       'https://web.telegram.org',
       'https://oauth.telegram.org',
       /\.t\.me$/,
       /\.telegram\.org$/,
-      /\.ngrok-free\.dev$/, // Allow all ngrok subdomains
-      'http://localhost:3000' // For local development
+      /\.trycloudflare\.com$/, // Allow all Cloudflare tunnel subdomains
+      'http://localhost:3000', // For local development
+      'http://localhost:5173' // Vite dev server
     ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -71,13 +78,16 @@ export function createApp() {
   // Body limits (prevent abuse)
   app.use(express.json({ limit: '10mb' })); // Increased limit for potential image uploads
   app.use(express.urlencoded({ extended: false, limit: '256kb' }));
+
+
   
 
 
   // Rate limit API (uses userId if available, else IPv6-safe IP key)
+  // Cloudflare Tunnel has no rate limits, so we can be generous here
   const apiLimiter = rateLimit({
     windowMs: 60_000, // 1 minute
-    max: 100, // Increased limit for API calls
+    max: 1000, // Much higher limit for Cloudflare Tunnel (was 100)
     standardHeaders: 'draft-7',
     legacyHeaders: false,
     // Use Telegram userId when present; otherwise IPv6-safe IP key
@@ -112,6 +122,9 @@ app.use('/api/s/:slug', resolveTenant, SearchRouter);
 
   // Mount helpers we’re missing:
   app.use('/api/contact-intent', contactRouter);
+  
+  // Mount team router BEFORE shop router so /api/shop/:slug/team/* routes work
+  app.use('/api', teamRouter);
   app.use('/api/shop', shopRouter);
   app.use('/api', shopsRouter);     // new: shops list + create tenant
   app.use('/api', membersRouter);   // new: invites + members mgmt
@@ -126,9 +139,11 @@ app.use('/api/s/:slug', resolveTenant, SearchRouter);
   app.use('/api', cartRouter);
   app.use('/api', buyerOrdersRouter);
   app.use('/api', universalRouter);
-  
-
-
+  app.use('/api', userOrdersRouter); // All user orders (buyer + owner)
+  app.use('/api', adminRouter); // Platform admin routes
+  app.use('/api', reportsRouter); // Public reports
+  app.use('/api/category-requests', categoryRequestsRouter); // Category requests
+  app.use('/api', cleanupRouter); // Cleanup service for expired shops
   // ----- Telegram Bot -----
   bot.use(ensureUser());
   registerCommonHandlers(bot);

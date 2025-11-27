@@ -35,6 +35,8 @@ async function toProfileApi(u: any) {
     avatarUrl: u.avatarUrl ?? null,
     // Extra field for web preview
     avatarWebUrl,
+    // Platform role for admin access
+    platformRole: u.platformRole ?? 'USER',
   };
 }
 

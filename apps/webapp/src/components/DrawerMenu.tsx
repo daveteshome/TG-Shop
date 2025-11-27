@@ -13,6 +13,23 @@ export default function DrawerMenu({ open, onClose }: Props) {
   const { t } = useTranslation();
   const nav = useNavigate();
   const loc = useLocation();
+  const [isAdmin, setIsAdmin] = React.useState(false);
+
+  // Check if user is admin
+  React.useEffect(() => {
+    async function checkAdmin() {
+      try {
+        // Import the api helper
+        const { api } = await import('../lib/api/index');
+        const data = await api<any>('/profile');
+        console.log('Profile data:', data); // Debug log
+        setIsAdmin(data.platformRole === 'ADMIN');
+      } catch (e) {
+        console.error('Failed to check admin status', e);
+      }
+    }
+    checkAdmin();
+  }, []);
 
     function getCurrentPath() {
     const hash = loc.hash || "";
@@ -67,75 +84,111 @@ export default function DrawerMenu({ open, onClose }: Props) {
           transition: "transform .22s ease", zIndex: 50, display: "flex", flexDirection: "column",
         }}
       >
-        <div style={{ padding: 16, borderBottom: "1px solid #eee", fontWeight: 700, fontSize: 18 }}>Menu</div>
+        {/* Header with gradient */}
+        <div style={{ 
+          padding: "20px 16px", 
+          background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+          color: "#fff",
+          fontWeight: 700, 
+          fontSize: 20,
+          letterSpacing: "0.5px",
+        }}>
+          Menu
+        </div>
 
-        <nav style={{ padding: 8, display: "grid", gap: 4 }}>
-          <li style={{ marginTop: 8 }}>
+        <nav style={{ padding: 12, display: "flex", flexDirection: "column", gap: 6, flex: 1, overflowY: "auto" }}>
+          {/* Language Selector - Temporarily Hidden */}
+          {/* <div style={{ marginBottom: 8 }}>
             <LanguageMenu />
-          </li>
+          </div> */}
 
-          {/* Normal links (no memory) */}
-          <Item to="/">🏠 {t("nav_home")}</Item>
-          <Item to="/universal">🌍 {t("nav_universal")}</Item>
+          {/* Main Navigation */}
+          <div style={sectionStyle}>
+            <div style={sectionTitleStyle}>Navigation</div>
+            <Item to="/universal"><span style={iconStyle}>🌍</span> {t("nav_universal", "Explore")}</Item>
+            
+            <button
+              type="button"
+              onClick={() => {
+                goWithMemory("joined", "/joined");
+                onClose();
+              }}
+              style={itemStyle}
+            >
+              <span style={iconStyle}>🤝</span> {t("nav_joined", "Joined Shops")}
+            </button>
 
-          {/* With memory */}
-          <button
-            type="button"
-            onClick={() => {
-              goWithMemory("joined", "/joined");
-              onClose();
-            }}
-            style={itemStyle}
-          >
-            🤝 {t("nav_joined")}
-          </button>
+            <button
+              type="button"
+              onClick={() => {
+                goWithMemory("shops", "/shops?mine=1");
+                onClose();
+              }}
+              style={itemStyle}
+            >
+              <span style={iconStyle}>🏪</span> {t("nav_myshops", "My Shops")}
+            </button>
 
-          <button
-            type="button"
-            onClick={() => {
-              goWithMemory("shops", "/shops?mine=1");
-              onClose();
-            }}
-            style={itemStyle}
-          >
-            🏪 {t("nav_myshops")}
-          </button>
+            <button
+              type="button"
+              onClick={() => {
+                goWithMemory("orders", "/orders");
+                onClose();
+              }}
+              style={itemStyle}
+            >
+              <span style={iconStyle}>📦</span> {t("nav_orders", "Orders")}
+            </button>
+          </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              goWithMemory("orders", "/orders");
-              onClose();
-            }}
-            style={itemStyle}
-          >
-            📦 {t("nav_orders")}
-          </button>
+          {/* Account Section */}
+          <div style={sectionStyle}>
+            <div style={sectionTitleStyle}>Account</div>
+            <button
+              type="button"
+              onClick={() => {
+                goWithMemory("profile", "/profile");
+                onClose();
+              }}
+              style={itemStyle}
+            >
+              <span style={iconStyle}>👤</span> {t("nav_profile", "Profile")}
+            </button>
 
-          {/* Cart stays global (no memory for now) */}
-          <Item to="/cart">🛒 {t("nav_cart")}</Item>
+            <button
+              type="button"
+              onClick={() => {
+                goWithMemory("settings", "/settings");
+                onClose();
+              }}
+              style={itemStyle}
+            >
+              <span style={iconStyle}>⚙️</span> {t("nav_settings", "Settings")}
+            </button>
+          </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              goWithMemory("profile", "/profile");
-              onClose();
-            }}
-            style={itemStyle}
-          >
-            👤 {t("nav_profile")}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              goWithMemory("settings", "/settings");
-              onClose();
-            }}
-            style={itemStyle}
-          >
-            ⚙️ {t("nav_settings")}
-          </button>
+          {/* Admin Panel - Only visible to admins */}
+          {isAdmin && (
+            <div style={{ marginTop: 8 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  nav("/admin");
+                  onClose();
+                }}
+                style={{
+                  ...itemStyle,
+                  background: "linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%)",
+                  color: "#fff",
+                  fontWeight: 600,
+                  border: "none",
+                  boxShadow: "0 2px 8px rgba(99, 102, 241, 0.3)",
+                }}
+              >
+                <span style={iconStyle}>🛡️</span> Admin Panel
+              </button>
+            </div>
+          )}
         </nav>
 
         <div style={{ marginTop: "auto", padding: 12 }}>
@@ -151,15 +204,46 @@ export default function DrawerMenu({ open, onClose }: Props) {
   );
 }
 
+const sectionStyle: React.CSSProperties = {
+  marginBottom: 16,
+};
+
+const sectionTitleStyle: React.CSSProperties = {
+  fontSize: 11,
+  fontWeight: 700,
+  textTransform: "uppercase",
+  letterSpacing: "0.5px",
+  color: "#94a3b8",
+  marginBottom: 8,
+  paddingLeft: 4,
+};
+
 const itemStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
-  justifyContent: "flex-start",   // 👈 this is key
-  gap: 10,
-  padding: "12px 12px",
+  justifyContent: "flex-start",
+  gap: 12,
+  padding: "12px 14px",
   borderRadius: 10,
   textDecoration: "none",
   color: "#111",
-  border: "1px solid #f1f5f9",
-  background: "#fff",
+  border: "none",
+  background: "#f8fafc",
+  fontSize: 15,
+  fontWeight: 500,
+  marginBottom: 4,
+  transition: "all 0.2s ease",
+  cursor: "pointer",
+  width: "100%",
+  textAlign: "left",
+};
+
+const iconStyle: React.CSSProperties = {
+  fontSize: 18,
+  width: 22,
+  height: 22,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  flexShrink: 0,
 };

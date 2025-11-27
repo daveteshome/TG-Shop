@@ -6,6 +6,7 @@ type Where = {
   tenantIds: string[] | "ALL";
   activeOnly?: boolean;
   categoryId?: string | null;
+  approvedOnly?: boolean;
 };
 
 function buildWhereFor(
@@ -39,6 +40,12 @@ function buildWhereFor(
   // activeOnly
   if (where.activeOnly) {
     clauses.push(`"p"."active" = true`);
+  }
+
+  // approvedOnly (for universal search)
+  if (where.approvedOnly) {
+    clauses.push(`"p"."publishToUniversal" = true`);
+    clauses.push(`"p"."reviewStatus" = 'approved'`);
   }
 
   // categoryId

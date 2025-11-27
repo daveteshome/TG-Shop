@@ -75,3 +75,35 @@ export function ready() {
     tg?.expand?.();
   } catch {}
 }
+
+export function getTelegramUser(): {
+  id?: string;
+  firstName?: string;
+  lastName?: string;
+  username?: string;
+  languageCode?: string;
+  phone?: string;
+} | null {
+  try {
+    const raw = getInitDataRaw();
+    if (!raw) return null;
+
+    const params = new URLSearchParams(raw);
+    const userRaw = params.get("user");
+    if (!userRaw) return null;
+
+    const user = JSON.parse(decodeURIComponent(userRaw));
+    
+    return {
+      id: user?.id?.toString(),
+      firstName: user?.first_name,
+      lastName: user?.last_name,
+      username: user?.username,
+      languageCode: user?.language_code,
+      phone: user?.phone_number, // Only available if user granted permission
+    };
+  } catch (e) {
+    console.error("Failed to parse Telegram user data:", e);
+    return null;
+  }
+}

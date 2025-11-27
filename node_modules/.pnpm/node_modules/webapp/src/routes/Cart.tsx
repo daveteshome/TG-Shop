@@ -1,6 +1,7 @@
 // apps/webapp/src/routes/Cart.tsx
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { Loader } from "../components/common/Loader";
 import { ErrorView } from "../components/common/ErrorView";
 import { money } from "../lib/format";
@@ -35,11 +36,19 @@ function mapApiItem(i: any): CartLine {
   return { itemId, productId, title, unitPrice, currency, qty, imageUrl };
 }
 
+type ShopInfo = {
+  shippingInfo?: string | null;
+  paymentMethods?: "cod" | "prepay" | "both" | null;
+  bankAccounts?: Array<{ id: string; bank: string; accountName: string; accountNumber: string }>;
+};
+
 export default function Cart() {
   const { slug } = useParams<{ slug?: string }>();
   const nav = useNavigate();
+  const { t } = useTranslation();
 
   const [items, setItems] = useState<CartLine[]>([]);
+  const [shopInfo, setShopInfo] = useState<ShopInfo | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -51,6 +60,24 @@ export default function Cart() {
       const rows: CartLine[] = (api?.items ?? []).map(mapApiItem);
       setItems(rows);
       setCountBadgeFrom(rows);
+
+      // Fetch shop info if we're in a shop context
+      if (slug) {
+        try {
+          const shopRes = await fetch(`/api/shop/${slug}`);
+          if (shopRes.ok) {
+            const shopData = await shopRes.json();
+            const tenant = shopData?.tenant ?? shopData?.shop ?? shopData;
+            setShopInfo({
+              shippingInfo: tenant?.shippingInfo ?? null,
+              paymentMethods: tenant?.paymentMethods ?? null,
+              bankAccounts: Array.isArray(tenant?.bankAccounts) ? tenant.bankAccounts : [],
+            });
+          }
+        } catch (e) {
+          console.error("Failed to fetch shop info:", e);
+        }
+      }
     } catch (e: any) {
       setErr(e?.message ? String(e.message) : String(e));
     } finally {
@@ -98,7 +125,7 @@ export default function Cart() {
     } catch {
       setItems(prev);
       setCountBadgeFrom(prev);
-      alert("Couldn't increase quantity. Please try again.");
+      alert(t('cart_qty_increase_error'));
     } finally {
       setBusyId(null);
     }
@@ -134,7 +161,7 @@ export default function Cart() {
     } catch {
       setItems(prev);
       setCountBadgeFrom(prev);
-      alert("Couldn't update item. Please try again.");
+      alert(t('cart_update_error'));
     } finally {
       setBusyId(null);
     }
@@ -161,7 +188,7 @@ export default function Cart() {
     } catch {
       setItems(prev);
       setCountBadgeFrom(prev);
-      alert("Couldn't remove item. Please try again.");
+      alert(t('cart_remove_error'));
     } finally {
       setBusyId(null);
     }
@@ -185,18 +212,52 @@ export default function Cart() {
   if (initialLoading) return <Loader />;
   if (err && !items.length) return <ErrorView error={err} />;
 
-    return (
-    <div style={{ padding: 10, paddingBottom: 90 }}>
+  return (
+    <div style={{ padding: 16, paddingBottom: 90 }}>
       {!items.length ? (
-        <div style={{ opacity: 0.7, padding: 20, textAlign: "center" }}>
-          Your cart is empty.
+        <div style={emptyState}>
+          <div style={{ fontSize: 64, marginBottom: 16 }}>🛒</div>
+          <div style={{ fontSize: 18, fontWeight: 600, color: "#111", marginBottom: 8 }}>
+            {t('empty_cart_message')}
+          </div>
+          <div style={{ fontSize: 14, color: "#666", marginBottom: 20 }}>
+            {t('cart_add_items_hint')}
+          </div>
+          <button
+            onClick={() => {
+              if (slug) nav(`/s/${slug}`);
+              else nav("/universal");
+            }}
+            style={{
+              background: "#000",
+              color: "#fff",
+              padding: "10px 20px",
+              borderRadius: 10,
+              border: "none",
+              fontSize: 14,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            {t('btn_continue_shopping')}
+          </button>
         </div>
       ) : (
         <>
-          <div style={{ display: "grid", gap: 10 }}>
+          {/* Header */}
+          <div style={{ marginBottom: 16 }}>
+            <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0, marginBottom: 4 }}>
+              🛒 {t('title_cart')}
+            </h1>
+            <div style={{ fontSize: 13, color: "#666" }}>
+              {items.length} {items.length === 1 ? t('cart_item_singular') : t('cart_items_plural')}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {filteredItems.length === 0 ? (
-              <div style={{ opacity: 0.7, padding: 20, textAlign: "center" }}>
-                No items in your cart match this search.
+              <div style={{ textAlign: "center", padding: 40, color: "#999" }}>
+                {t('cart_no_match')}
               </div>
             ) : (
               filteredItems.map((it) => {
@@ -205,13 +266,8 @@ export default function Cart() {
                 const handleOpen =
                   it.productId && it.productId.length > 0
                     ? () => {
-                        if (slug) {
-                          // Buyer shop cart → buyer product detail
-                          nav(`/s/${slug}/p/${it.productId}`);
-                        } else {
-                          // Global cart (if used) → universal product detail
-                          nav(`/universal/p/${it.productId}`);
-                        }
+                        if (slug) nav(`/s/${slug}/p/${it.productId}`);
+                        else nav(`/universal/p/${it.productId}`);
                       }
                     : undefined;
 
@@ -234,51 +290,63 @@ export default function Cart() {
             )}
           </div>
 
-          {/* keep your existing summary / totals block below,
-              using `total` and `currency` as before */}
-              <div
-      style={{
-        marginTop: 20,
-        padding: "16px",
-        borderRadius: 12,
-        border: "1px solid rgba(0,0,0,0.06)",
-        background: "#fff",
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-      }}
-    >
-      <div>
-        <div style={{ fontSize: 12, opacity: 0.7 }}>Total</div>
-        <div style={{ fontSize: 18, fontWeight: 700 }}>
-          {money(total, currency)}
-        </div>
-      </div>
+          {/* Summary */}
+          <div style={summaryCard}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+              <span style={{ fontSize: 14, color: "#666" }}>{t('subtotal')}</span>
+              <span style={{ fontSize: 14, fontWeight: 600 }}>{money(total, currency)}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16, paddingTop: 12, borderTop: "1px solid #e5e7eb" }}>
+              <span style={{ fontSize: 16, fontWeight: 700 }}>{t('total')}</span>
+              <span style={{ fontSize: 18, fontWeight: 700 }}>{money(total, currency)}</span>
+            </div>
 
-      <button
-        onClick={() => {
-          if (slug) nav(`/s/${slug}/checkout`);
-          else nav("/checkout");
-        }}
-        style={{
-          background: "#000",
-          color: "#fff",
-          padding: "12px 20px",
-          borderRadius: 10,
-          border: "none",
-          fontSize: 15,
-          fontWeight: 600,
-          cursor: "pointer",
-        }}
-      >
-        Checkout
-      </button>
-    </div>
+            {/* Shop configuration validation */}
+            {slug && shopInfo && (!shopInfo.shippingInfo || !shopInfo.paymentMethods) && (
+              <div style={{
+                padding: "12px",
+                background: "#FEF3C7",
+                border: "1px solid #F59E0B",
+                borderRadius: 8,
+                marginBottom: 12,
+                fontSize: 13,
+                color: "#92400E",
+                lineHeight: 1.5,
+              }}>
+                <div style={{ fontWeight: 600, marginBottom: 4 }}>⚠️ {t('checkout_unavailable', 'Checkout Unavailable')}</div>
+                <div>
+                  {!shopInfo.shippingInfo && (
+                    <div>• {t('shop_no_delivery_regions', 'Shop has not configured delivery regions')}</div>
+                  )}
+                  {!shopInfo.paymentMethods && (
+                    <div>• {t('shop_no_payment_methods', 'Shop has not configured payment methods')}</div>
+                  )}
+                </div>
+                <div style={{ marginTop: 8, fontSize: 12, opacity: 0.9 }}>
+                  {t('contact_shop_owner', 'Please contact the shop owner to complete their shop setup.')}
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={() => {
+                if (slug) nav(`/s/${slug}/checkout`);
+                else nav("/checkout");
+              }}
+              disabled={Boolean(slug && shopInfo && (!shopInfo.shippingInfo || !shopInfo.paymentMethods))}
+              style={{
+                ...checkoutButton,
+                opacity: slug && shopInfo && (!shopInfo.shippingInfo || !shopInfo.paymentMethods) ? 0.5 : 1,
+                cursor: slug && shopInfo && (!shopInfo.shippingInfo || !shopInfo.paymentMethods) ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {t('btn_proceed_checkout')}
+            </button>
+          </div>
         </>
       )}
     </div>
   );
-
 }
 
 /* ---------- Item row ---------- */
@@ -348,18 +416,22 @@ function CartRow({
           {title}
         </div>
 
-        <div style={{ fontWeight: 700 }}>{money(unitPrice, currency)}</div>
+        <div style={{ fontSize: 15, fontWeight: 700, marginTop: 4, marginBottom: 8 }}>
+          {money(unitPrice, currency)}
+        </div>
 
-        <div style={qtyRow}>
-          <button onClick={onDec} disabled={busy} style={qtyBtn}>
-            −
-          </button>
-          <span style={qtyBadge}>{qty}</span>
-          <button onClick={onInc} disabled={busy} style={qtyBtn}>
-            +
-          </button>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={qtyRow}>
+            <button onClick={onDec} disabled={busy} style={qtyBtn}>
+              −
+            </button>
+            <span style={qtyBadge}>{qty}</span>
+            <button onClick={onInc} disabled={busy} style={qtyBtn}>
+              +
+            </button>
+          </div>
           <button onClick={onRemove} disabled={busy} style={removeBtn}>
-            Remove
+            🗑️
           </button>
         </div>
       </div>
@@ -371,19 +443,19 @@ function CartRow({
 
 const row: React.CSSProperties = {
   display: "flex",
-  gap: 10,
-  border: "1px solid rgba(0,0,0,.08)",
+  gap: 12,
+  border: "1px solid #e5e7eb",
   borderRadius: 12,
-  padding: 10,
-  background: "var(--tg-theme-bg-color,#fff)",
-  alignItems: "center",
+  padding: 12,
+  background: "#fff",
+  alignItems: "flex-start",
 };
 
 const thumbWrap: React.CSSProperties = {
-  width: 76,
-  height: 76,
-  flex: "0 0 76px",
-  background: "#f2f2f2",
+  width: 70,
+  height: 70,
+  flex: "0 0 70px",
+  background: "#f5f5f5",
   borderRadius: 10,
   overflow: "hidden",
   display: "grid",
@@ -391,65 +463,79 @@ const thumbWrap: React.CSSProperties = {
 };
 
 const titleStyle: React.CSSProperties = {
-  fontWeight: 700,
-  marginBottom: 4,
+  fontWeight: 600,
+  fontSize: 14,
+  marginBottom: 2,
   whiteSpace: "nowrap",
   overflow: "hidden",
   textOverflow: "ellipsis",
+  color: "#111",
 };
 
 const qtyRow: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
-  gap: 6,
-  marginTop: 6,
+  gap: 4,
+  background: "#f5f5f5",
+  borderRadius: 8,
+  padding: "2px",
 };
 
 const qtyBtn: React.CSSProperties = {
   width: 28,
   height: 28,
-  borderRadius: 8,
-  border: "1px solid rgba(0,0,0,.15)",
-  background: "var(--tg-theme-secondary-bg-color,#f5f7fa)",
-  fontSize: 18,
-  lineHeight: "26px",
-  textAlign: "center",
+  borderRadius: 6,
+  border: "none",
+  background: "#fff",
+  fontSize: 16,
+  fontWeight: 600,
+  cursor: "pointer",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
 };
 
 const qtyBadge: React.CSSProperties = {
-  minWidth: 28,
+  minWidth: 32,
   textAlign: "center",
-  fontWeight: 700,
+  fontWeight: 600,
+  fontSize: 14,
 };
 
 const removeBtn: React.CSSProperties = {
-  marginLeft: "auto",
   border: "none",
   background: "transparent",
-  color: "#d33",
-  fontSize: 12,
-  textDecoration: "underline",
+  fontSize: 18,
   cursor: "pointer",
+  padding: 4,
+  opacity: 0.6,
 };
 
-const summary: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  marginTop: 12,
-  padding: 12,
+const summaryCard: React.CSSProperties = {
+  marginTop: 20,
+  padding: 16,
   borderRadius: 12,
-  background: "rgba(0,0,0,.04)",
+  border: "1px solid #e5e7eb",
+  background: "#fff",
 };
 
-const checkoutBtn: React.CSSProperties = {
+const checkoutButton: React.CSSProperties = {
   width: "100%",
-  marginTop: 12,
-  padding: "10px 14px",
-  borderRadius: 12,
+  padding: "14px",
+  borderRadius: 10,
   border: "none",
-  background: "#111",
+  background: "#000",
   color: "#fff",
-  fontWeight: 700,
+  fontWeight: 600,
   fontSize: 15,
   cursor: "pointer",
+};
+
+const emptyState: React.CSSProperties = {
+  textAlign: "center",
+  padding: "60px 20px",
+  background: "#fff",
+  borderRadius: 12,
+  border: "1px solid #e5e7eb",
+  marginTop: 40,
 };

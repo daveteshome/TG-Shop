@@ -74,7 +74,7 @@ export function checkout(
   payload: {
     address: CheckoutAddressPayload;
     note?: string | null;
-    payment?: { method: "COD" | "BANK"; ref?: string | null };
+    payment?: { method: "COD" | "BANK"; ref?: string | null; receiptImageId?: string | null };
   },
   opts: WithTenantOpts = {}
 ): Promise<CheckoutResult> {
